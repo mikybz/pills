@@ -25,26 +25,28 @@ export function parsePresets(m: MedicineDTO): number[] {
   }
 }
 
+// Fixed categorical order; hexes validated for CVD separation and 3:1 surface
+// contrast in light and dark mode (Tailwind 600-level).
 export const MEDICINE_COLORS = [
   "blue",
-  "teal",
-  "violet",
-  "rose",
   "amber",
+  "teal",
+  "rose",
+  "violet",
   "lime",
 ] as const;
 export type MedicineColor = (typeof MEDICINE_COLORS)[number];
 
 export const colorClasses: Record<
   string,
-  { accent: string; bg: string; text: string; dot: string }
+  { accent: string; bg: string; text: string; dot: string; chart: string }
 > = {
-  blue: { accent: "border-l-blue-500", bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400", dot: "bg-blue-500" },
-  teal: { accent: "border-l-teal-500", bg: "bg-teal-500/10", text: "text-teal-600 dark:text-teal-400", dot: "bg-teal-500" },
-  violet: { accent: "border-l-violet-500", bg: "bg-violet-500/10", text: "text-violet-600 dark:text-violet-400", dot: "bg-violet-500" },
-  rose: { accent: "border-l-rose-500", bg: "bg-rose-500/10", text: "text-rose-600 dark:text-rose-400", dot: "bg-rose-500" },
-  amber: { accent: "border-l-amber-500", bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  lime: { accent: "border-l-lime-500", bg: "bg-lime-500/10", text: "text-lime-600 dark:text-lime-400", dot: "bg-lime-500" },
+  blue: { accent: "border-l-blue-600", bg: "bg-blue-600/10", text: "text-blue-600 dark:text-blue-400", dot: "bg-blue-600", chart: "#2563eb" },
+  amber: { accent: "border-l-amber-600", bg: "bg-amber-600/10", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-600", chart: "#d97706" },
+  teal: { accent: "border-l-teal-600", bg: "bg-teal-600/10", text: "text-teal-600 dark:text-teal-400", dot: "bg-teal-600", chart: "#0d9488" },
+  rose: { accent: "border-l-rose-600", bg: "bg-rose-600/10", text: "text-rose-600 dark:text-rose-400", dot: "bg-rose-600", chart: "#e11d48" },
+  violet: { accent: "border-l-violet-600", bg: "bg-violet-600/10", text: "text-violet-600 dark:text-violet-400", dot: "bg-violet-600", chart: "#7c3aed" },
+  lime: { accent: "border-l-lime-600", bg: "bg-lime-600/10", text: "text-lime-600 dark:text-lime-400", dot: "bg-lime-600", chart: "#65a30d" },
 };
 
 export type LogResponse = { dose: DoseDTO; safety: SafetyResult };
