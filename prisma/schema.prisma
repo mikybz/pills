@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String     @id
+  email          String     @unique
+  name           String?
+  locale         String     @default("en")
+  theme          String     @default("system")
+  strictness     Float      @default(0.15)
+  wakeWindowH    Float      @default(12)
+  countUncertain Boolean    @default(true)
+  onboarded      Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+  medicines      Medicine[]
+  doses          DoseLog[]
+}
+
+model Medicine {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  form           String    @default("pill")
+  unit           String    @default("mg")
+  color          String    @default("blue")
+  presets        String    @default("[1]")
+  defaultPreset  Float?
+  maxPerIntake   Float?
+  maxPerDay      Float?
+  minIntervalMin Int?
+  scheduleHints  String?
+  notes          String?
+  sortOrder      Int       @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  doses          DoseLog[]
+
+  @@index([userId, archivedAt])
+}
+
+model DoseLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  medicineId String
+  medicine   Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  amount     Float
+  takenAt    DateTime
+  status     String   @default("taken")
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, takenAt])
+  @@index([medicineId, takenAt])
+}
