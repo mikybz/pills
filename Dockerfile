@@ -10,6 +10,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="file:./data/pills.db"
 RUN npm run build
 
+# Prisma CLI stage — `migrate deploy` needs the CLI's full dependency tree,
+# which the Next standalone output does not include.
+FROM node:24-alpine AS prisma-cli
+WORKDIR /opt/prisma
+RUN npm install --ignore-scripts prisma@6.19.3
+
 # Runtime stage
 FROM node:24-alpine
 WORKDIR /app
@@ -19,8 +25,8 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=prisma-cli /opt/prisma/node_modules /opt/prisma/node_modules
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh && mkdir -p /app/data
 VOLUME /app/data
