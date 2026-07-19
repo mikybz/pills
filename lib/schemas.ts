@@ -15,6 +15,7 @@ export const medicineSchema = z.object({
   scheduleHints: z.array(z.string().regex(/^\d{2}:\d{2}$/)).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   sortOrder: z.number().int().optional(),
+  hidden: z.boolean().optional(),
 });
 
 export const doseSchema = z.object({

@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArchiveRestore, CircleHelp, LogOut, Pencil, Plus } from "lucide-react";
+import {
+  ArchiveRestore,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
+  LogOut,
+  Pencil,
+  Plus,
+} from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -59,6 +67,48 @@ export function SettingsScreen() {
     [t],
   );
 
+  const moveMedicine = useCallback(
+    async (id: string, direction: -1 | 1) => {
+      const activeIds = medicines.filter((m) => !m.archivedAt).map((m) => m.id);
+      const from = activeIds.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= activeIds.length) return;
+      [activeIds[from], activeIds[to]] = [activeIds[to], activeIds[from]];
+      const rank = new Map(activeIds.map((mid, i) => [mid, i]));
+      setMedicines((prev) =>
+        [...prev]
+          .map((m) => (rank.has(m.id) ? { ...m, sortOrder: rank.get(m.id)! } : m))
+          .sort((a, b) => a.sortOrder - b.sortOrder),
+      );
+      try {
+        await api("/api/medicines/reorder", {
+          method: "PUT",
+          body: JSON.stringify({ ids: activeIds }),
+        });
+      } catch {
+        toast.error(t("common.error"));
+        void reload();
+      }
+    },
+    [medicines, reload, t],
+  );
+
+  const setHidden = useCallback(
+    async (id: string, hidden: boolean) => {
+      setMedicines((prev) => prev.map((m) => (m.id === id ? { ...m, hidden } : m)));
+      try {
+        await api(`/api/medicines/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ hidden }),
+        });
+      } catch {
+        toast.error(t("common.error"));
+        void reload();
+      }
+    },
+    [reload, t],
+  );
+
   async function setLocale(value: string) {
     document.cookie = `locale=${value};path=/;max-age=31536000;SameSite=Lax`;
     await updateProfile({ locale: value } as Partial<ProfileDTO>);
@@ -100,23 +150,53 @@ export function SettingsScreen() {
         </div>
         <Card className="gap-0 p-0">
           <ul className="divide-y">
-            {active.map((m) => (
-              <li key={m.id} className="flex items-center gap-3 px-4 py-3">
+            {active.map((m, i) => (
+              <li
+                key={m.id}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-3",
+                  m.hidden && "opacity-60",
+                )}
+              >
                 <span
                   className={cn(
                     "size-3 shrink-0 rounded-full",
                     (colorClasses[m.color] ?? colorClasses.blue).dot,
                   )}
                 />
-                <span className="flex-1">
-                  <span className="font-medium">{m.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{m.name}</span>
                   <span className="block text-xs text-muted-foreground">
                     {t(`settings.form${m.form.charAt(0).toUpperCase() + m.form.slice(1)}`)} ·{" "}
                     {m.maxPerDay
                       ? `max ${formatAmount(m.maxPerDay)} ${m.unit}/d`
                       : m.unit}
+                    {m.hidden && <> · {t("settings.hiddenBadge")}</>}
                   </span>
                 </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("settings.moveUp")}
+                  disabled={i === 0}
+                  onClick={() => moveMedicine(m.id, -1)}
+                >
+                  <ChevronUp className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("settings.moveDown")}
+                  disabled={i === active.length - 1}
+                  onClick={() => moveMedicine(m.id, 1)}
+                >
+                  <ChevronDown className="size-4" />
+                </Button>
+                <Switch
+                  checked={!m.hidden}
+                  aria-label={t("settings.showOnHome")}
+                  onCheckedChange={(v) => setHidden(m.id, !v)}
+                />
                 <Button
                   variant="ghost"
                   size="icon"

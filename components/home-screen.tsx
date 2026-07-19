@@ -179,7 +179,7 @@ export function HomeScreen() {
         </Card>
       )}
 
-      {medicines.map((m) => (
+      {medicines.filter((m) => !m.hidden).map((m) => (
         <MedicineCard
           key={m.id}
           medicine={m}
@@ -239,7 +239,8 @@ function TodayRibbon({
         .reduce((s, d) => s + d.amount, 0);
       return { m, total };
     })
-    .filter((r) => r.m.maxPerDay || r.total > 0);
+    // Hidden medicines keep their ribbon row only if something was logged today.
+    .filter((r) => r.total > 0 || (!r.m.hidden && r.m.maxPerDay));
 
   if (!rows.length) return null;
 

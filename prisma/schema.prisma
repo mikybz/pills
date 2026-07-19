@@ -38,6 +38,7 @@ model Medicine {
   scheduleHints  String?
   notes          String?
   sortOrder      Int       @default(0)
+  hidden         Boolean   @default(false)
   archivedAt     DateTime?
   createdAt      DateTime  @default(now())
   doses          DoseLog[]
