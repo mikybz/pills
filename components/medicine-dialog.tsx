@@ -46,8 +46,11 @@ export function MedicineDialog({
   open,
   onClose,
   onChanged,
+  personId,
 }: {
   medicine: MedicineDTO | null;
+  /** Person a new medicine is created for. */
+  personId?: string;
   open: boolean;
   onClose: () => void;
   onChanged: () => void;
@@ -101,7 +104,7 @@ export function MedicineDialog({
     try {
       await api(medicine ? `/api/medicines/${medicine.id}` : "/api/medicines", {
         method: medicine ? "PATCH" : "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify(medicine ? body : { ...body, personId }),
       });
       toast.success(t("saved"));
       onChanged();

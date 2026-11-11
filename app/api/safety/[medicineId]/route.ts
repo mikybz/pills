@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
+import { findAccessibleMedicine } from "@/lib/persons";
 import { evaluateDose, type DoseEntry, type DoseStatus } from "@/lib/safety";
 
 type Params = { params: Promise<{ medicineId: string }> };
@@ -8,9 +9,7 @@ type Params = { params: Promise<{ medicineId: string }> };
 export async function GET(req: NextRequest, { params }: Params) {
   const { medicineId } = await params;
   return withUser(async (user) => {
-    const medicine = await prisma.medicine.findFirst({
-      where: { id: medicineId, userId: user.id },
-    });
+    const medicine = await findAccessibleMedicine(user.id, medicineId);
     if (!medicine) return notFound();
 
     const amountParam = req.nextUrl.searchParams.get("amount");
@@ -24,7 +23,6 @@ export async function GET(req: NextRequest, { params }: Params) {
     const recent = await prisma.doseLog.findMany({
       where: {
         medicineId,
-        userId: user.id,
         takenAt: { gte: new Date(now.getTime() - 48 * 3_600_000), lte: now },
       },
     });

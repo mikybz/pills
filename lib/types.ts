@@ -12,7 +12,36 @@ export type DoseDTO = Omit<DoseLog, "takenAt" | "createdAt" | "updatedAt"> & {
   takenAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Who logged the dose (included on list endpoints). */
+  loggedBy?: { id: string; name: string | null; email: string } | null;
 };
+
+export const PERSON_KINDS = ["person", "dog", "cat", "other"] as const;
+export type PersonKind = (typeof PERSON_KINDS)[number];
+
+export interface PersonMember {
+  id: string;
+  name: string;
+  email: string;
+  isMe: boolean;
+  isOwner: boolean;
+}
+
+export interface PersonDTO {
+  id: string;
+  name: string;
+  kind: string;
+  /** The signed-in user's own person — can't be deleted. */
+  isSelf: boolean;
+  /** Another user's own person, shared with me. */
+  isOtherUsersSelf: boolean;
+  /** Only the creator of a (non-self) person may delete it. */
+  canDelete: boolean;
+  /** Owner (creator / self user) may remove other members. */
+  canManageAccess: boolean;
+  ownerId: string;
+  members: PersonMember[];
+}
 
 export type ProfileDTO = Omit<User, "createdAt"> & { createdAt: string };
 

@@ -10,10 +10,12 @@ export async function PUT(req: NextRequest) {
     const parsed = reorderSchema.safeParse(await req.json());
     if (!parsed.success) return badRequest(parsed.error.message);
     const { ids } = parsed.data;
-    const owned = await prisma.medicine.count({
-      where: { id: { in: ids }, userId: user.id },
+    // All ids must belong to one person the user can access.
+    const meds = await prisma.medicine.findMany({
+      where: { id: { in: ids }, person: { access: { some: { userId: user.id } } } },
+      select: { personId: true },
     });
-    if (owned !== ids.length) return badRequest("Unknown medicine id");
+    if (meds.length !== ids.length || new Set(meds.map((m) => m.personId)).size !== 1) return badRequest("Unknown medicine id");
     await prisma.$transaction(
       ids.map((id, index) =>
         prisma.medicine.update({ where: { id }, data: { sortOrder: index } }),

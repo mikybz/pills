@@ -22,8 +22,11 @@ export function MedicineCard({
   safetyConfig,
   onQuickLog,
   onMore,
+  meId,
 }: {
   medicine: MedicineDTO;
+  /** Signed-in user; when the last dose was logged by someone else we say who. */
+  meId?: string | null;
   /** This medicine's doses, newest first, covering at least 48 h. */
   doses: DoseDTO[];
   safetyConfig: SafetyConfig;
@@ -43,6 +46,11 @@ export function MedicineCard({
   }));
   const counted = entries.filter((d) => d.status !== "skipped");
   const last = counted.length ? counted[0] : null;
+  const lastDose = doses.find((d) => d.status !== "skipped");
+  const lastBy =
+    lastDose?.loggedBy && meId && lastDose.loggedBy.id !== meId
+      ? (lastDose.loggedBy.name ?? lastDose.loggedBy.email)
+      : null;
 
   const refAmount = medicine.defaultPreset ?? presets[0];
   const refSafety = evaluateDose(safetyConfig, entries, refAmount, now);
@@ -60,6 +68,7 @@ export function MedicineCard({
                   unit: medicine.unit,
                 })
               : t("home.neverTaken")}
+            {lastBy && <> · {t("people.loggedBy", { name: lastBy })}</>}
             {last?.status === "uncertain" && (
               <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-xs">
                 {t("home.uncertainBadge")}

@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import Authentik from "next-auth/providers/authentik";
 import { prisma } from "@/lib/db";
+import { ensureSelfPerson } from "@/lib/persons";
 
 export const devBypass = process.env.AUTH_DEV_BYPASS === "true";
 
@@ -49,9 +50,14 @@ export async function currentUser() {
       name: session.user.name ?? null,
     };
   }
-  return prisma.user.upsert({
+  const user = await prisma.user.upsert({
     where: { id: identity.id },
     create: identity,
     update: {},
   });
+  if (!user.defaultPersonId) {
+    const self = await ensureSelfPerson(user);
+    return { ...user, defaultPersonId: self.id };
+  }
+  return user;
 }

@@ -238,3 +238,39 @@ Apple/Google Health export · med interaction warnings · widgets.
 6. Settings: medicines CRUD, profile prefs; i18n en/nb; help system + onboarding.
 7. Auth.js + Authentik OIDC (+ dev bypass); middleware.
 8. PWA (manifest/SW/icons), Dockerfile, README.md, CLAUDE.md, deploy notes.
+
+---
+
+## Persons, pets & sharing (added 2026-11)
+
+Track medicine for more than the signed-in user — family members, dogs, other animals —
+and share tracking between users.
+
+**Model**
+- `Person` (name, `kind`: person | dog | cat | other). Every user gets an undeletable
+  *self* person (`selfOfUserId`) created on first request. Users can create more persons
+  (`createdById` = creator).
+- `PersonAccess` (personId, userId) — who can see/edit a person. Creator/self always has
+  access; sharing adds rows.
+- `Medicine.personId` replaces `Medicine.userId`. Doses keep `userId`, now meaning
+  *logged by* (shown in history when someone else logged it).
+- `User.defaultPersonId` — which person the app opens on. Falls back to self.
+- `ShareToken` — one-time code (stored as SHA-256 hash), expires after 24 h, consumed on
+  first use.
+
+**Rules**
+- Anyone with access can do everything (medicines, doses, rename) **except delete**.
+- Only the creator can delete a created person (cascades medicines + doses). A self
+  person can never be deleted.
+- Any user with access can generate a share code. A recipient redeems it in Settings →
+  People → "Add with code" (or via the `/settings?join=CODE` link).
+- A user can leave a person shared with them; the creator / self-owner can remove others.
+- Shared persons show a "shared" badge + avatars of the other users in the switcher and
+  in Settings → People.
+
+**UI**
+- Person switcher in the header (current person name + kind icon). Selection is kept for
+  the browser session (sessionStorage); a fresh start opens the default person.
+- Settings → People: list, create, rename, set default, share (code + copy link), leave,
+  delete, add-with-code.
+- Safety settings (strictness, waking hours, count-uncertain) stay per *user* (viewer).
