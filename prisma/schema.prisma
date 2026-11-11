@@ -17,15 +17,59 @@ model User {
   wakeWindowH    Float      @default(12)
   countUncertain Boolean    @default(true)
   onboarded      Boolean    @default(false)
+  defaultPersonId String?
+  defaultPerson   Person?    @relation("DefaultPerson", fields: [defaultPersonId], references: [id], onDelete: SetNull)
   createdAt      DateTime   @default(now())
-  medicines      Medicine[]
   doses          DoseLog[]
+  selfPerson     Person?    @relation("SelfPerson")
+  createdPersons Person[]   @relation("CreatedPersons")
+  access         PersonAccess[]
+  shareTokens    ShareToken[] @relation("TokenCreator")
+}
+
+model Person {
+  id           String         @id @default(cuid())
+  name         String
+  kind         String         @default("person")
+  selfOfUserId String?        @unique
+  selfOf       User?          @relation("SelfPerson", fields: [selfOfUserId], references: [id], onDelete: Cascade)
+  createdById  String
+  createdBy    User           @relation("CreatedPersons", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt    DateTime       @default(now())
+  access       PersonAccess[]
+  medicines    Medicine[]
+  shareTokens  ShareToken[]
+  defaultFor   User[]         @relation("DefaultPerson")
+}
+
+model PersonAccess {
+  personId  String
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([personId, userId])
+  @@index([userId])
+}
+
+model ShareToken {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  personId    String
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User      @relation("TokenCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  usedAt      DateTime?
+  usedById    String?
+  createdAt   DateTime  @default(now())
 }
 
 model Medicine {
   id             String    @id @default(cuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personId       String
+  person         Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
   name           String
   form           String    @default("pill")
   unit           String    @default("mg")
@@ -43,7 +87,7 @@ model Medicine {
   createdAt      DateTime  @default(now())
   doses          DoseLog[]
 
-  @@index([userId, archivedAt])
+  @@index([personId, archivedAt])
 }
 
 model DoseLog {

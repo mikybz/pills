@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
+import { findAccessibleMedicine, resolvePersonId } from "@/lib/persons";
 import { evaluateDose, type DoseEntry, type DoseStatus } from "@/lib/safety";
 
 export async function GET(req: NextRequest) {
@@ -10,16 +11,21 @@ export async function GET(req: NextRequest) {
     const from = sp.get("from") ? new Date(sp.get("from")!) : undefined;
     const to = sp.get("to") ? new Date(sp.get("to")!) : undefined;
     const medicineId = sp.get("medicineId") ?? undefined;
+    const personId = await resolvePersonId(user, sp.get("personId"));
+    if (!personId) return notFound();
     const doses = await prisma.doseLog.findMany({
       where: {
-        userId: user.id,
+        medicine: { personId },
         ...(medicineId ? { medicineId } : {}),
         takenAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) },
       },
       orderBy: { takenAt: "desc" },
       take: 2000,
+      include: { user: { select: { id: true, name: true, email: true } } },
     });
-    return NextResponse.json(doses);
+    return NextResponse.json(
+      doses.map(({ user: loggedBy, ...d }) => ({ ...d, loggedBy })),
+    );
   });
 }
 
@@ -29,16 +35,13 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) return badRequest(parsed.error.message);
     const { medicineId, amount, takenAt, status, note } = parsed.data;
 
-    const medicine = await prisma.medicine.findFirst({
-      where: { id: medicineId, userId: user.id },
-    });
+    const medicine = await findAccessibleMedicine(user.id, medicineId);
     if (!medicine) return notFound();
 
     const when = takenAt ?? new Date();
     const recent = await prisma.doseLog.findMany({
       where: {
         medicineId,
-        userId: user.id,
         takenAt: { gte: new Date(when.getTime() - 48 * 3_600_000), lt: when },
       },
     });
@@ -63,6 +66,7 @@ export async function POST(req: NextRequest) {
     const dose = await prisma.doseLog.create({
       data: { userId: user.id, medicineId, amount, takenAt: when, status, note },
     });
-    return NextResponse.json({ dose, safety }, { status: 201 });
+    const loggedBy = { id: user.id, name: user.name, email: user.email };
+    return NextResponse.json({ dose: { ...dose, loggedBy }, safety }, { status: 201 });
   });
 }

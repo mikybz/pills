@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound } from "@/lib/api";
+import { withUser, badRequest, notFound, onlySent } from "@/lib/api";
 import { medicineSchema } from "@/lib/schemas";
+import { findAccessibleMedicine } from "@/lib/persons";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   return withUser(async (user) => {
-    const existing = await prisma.medicine.findFirst({ where: { id, userId: user.id } });
+    const existing = await findAccessibleMedicine(user.id, id);
     if (!existing) return notFound();
     const body = await req.json();
-    const parsed = medicineSchema.partial().safeParse(body);
+    const parsed = medicineSchema.partial().omit({ personId: true }).safeParse(body);
     if (!parsed.success) return badRequest(parsed.error.message);
-    const { presets, scheduleHints, ...rest } = parsed.data;
+    const { presets, scheduleHints, ...rest } = onlySent(parsed.data, body);
     const medicine = await prisma.medicine.update({
       where: { id },
       data: {
@@ -33,8 +34,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const { id } = await params;
   return withUser(async (user) => {
+    if (!(await findAccessibleMedicine(user.id, id))) return notFound();
     const existing = await prisma.medicine.findFirst({
-      where: { id, userId: user.id },
+      where: { id },
       include: { _count: { select: { doses: true } } },
     });
     if (!existing) return notFound();

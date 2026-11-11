@@ -12,6 +12,7 @@ import { LogSheet, type LogRequest } from "@/components/log-sheet";
 import { WarningDialog } from "@/components/warning-dialog";
 import { Onboarding } from "@/components/onboarding";
 import { api } from "@/lib/client";
+import { usePersons } from "@/components/person-context";
 import {
   parsePresets,
   type DoseDTO,
@@ -36,6 +37,8 @@ interface PendingLog {
 
 export function HomeScreen() {
   const t = useTranslations();
+  const { current, meId } = usePersons();
+  const personId = current?.id;
   const [profile, setProfile] = useState<ProfileDTO | null>(null);
   const [medicines, setMedicines] = useState<MedicineDTO[] | null>(null);
   const [doses, setDoses] = useState<DoseDTO[]>([]);
@@ -43,16 +46,18 @@ export function HomeScreen() {
   const [pending, setPending] = useState<PendingLog | null>(null);
 
   const reload = useCallback(async () => {
+    if (!personId) return;
     const from = new Date(Date.now() - 7 * 24 * 3_600_000).toISOString();
+    const pid = encodeURIComponent(personId);
     const [p, m, d] = await Promise.all([
       api<ProfileDTO>("/api/profile"),
-      api<MedicineDTO[]>("/api/medicines"),
-      api<DoseDTO[]>(`/api/doses?from=${encodeURIComponent(from)}`),
+      api<MedicineDTO[]>(`/api/medicines?personId=${pid}`),
+      api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`),
     ]);
     setProfile(p);
     setMedicines(m);
     setDoses(d);
-  }, []);
+  }, [personId]);
 
   useEffect(() => {
     reload().catch(() => toast.error(t("common.error")));
@@ -144,7 +149,7 @@ export function HomeScreen() {
     [dosesByMedicine, configFor, persist],
   );
 
-  if (!medicines || !profile) {
+  if (!medicines || !profile || !current || medicines.some((m) => m.personId !== current.id)) {
     return <p className="py-12 text-center text-muted-foreground">{t("common.loading")}</p>;
   }
 
@@ -185,6 +190,7 @@ export function HomeScreen() {
           medicine={m}
           doses={dosesByMedicine.get(m.id) ?? []}
           safetyConfig={configFor(m)}
+          meId={meId}
           onQuickLog={(amount) =>
             requestLog(m, { amount, takenAt: new Date(), status: "taken" })
           }

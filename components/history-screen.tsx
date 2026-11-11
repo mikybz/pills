@@ -23,6 +23,7 @@ import {
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
 import { api } from "@/lib/client";
 import { colorClasses, type DoseDTO, type MedicineDTO } from "@/lib/types";
+import { usePersons } from "@/components/person-context";
 import { formatAmount, formatDay, formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -45,8 +46,14 @@ interface TooltipState {
 export function HistoryScreen() {
   const t = useTranslations();
   const locale = useLocale();
+  const personId = usePersons().current?.id;
   const [range, setRange] = useState<Range>("3d");
   const [medicineFilter, setMedicineFilter] = useState<string>("all");
+  const [prevPersonId, setPrevPersonId] = useState(personId);
+  if (prevPersonId !== personId) {
+    setPrevPersonId(personId);
+    setMedicineFilter("all");
+  }
   const [medicines, setMedicines] = useState<MedicineDTO[]>([]);
   const [doses, setDoses] = useState<DoseDTO[] | null>(null);
   const [editing, setEditing] = useState<DoseDTO | null>(null);
@@ -56,13 +63,15 @@ export function HistoryScreen() {
     const from = days
       ? new Date(Date.now() - days * 24 * 3_600_000).toISOString()
       : new Date(0).toISOString();
+    if (!personId) return;
+    const pid = encodeURIComponent(personId);
     const [m, d] = await Promise.all([
-      api<MedicineDTO[]>("/api/medicines?archived=true"),
-      api<DoseDTO[]>(`/api/doses?from=${encodeURIComponent(from)}`),
+      api<MedicineDTO[]>(`/api/medicines?personId=${pid}&archived=true`),
+      api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`),
     ]);
     setMedicines(m);
     setDoses(d);
-  }, [range]);
+  }, [range, personId]);
 
   useEffect(() => {
     reload().catch(() => toast.error(t("common.error")));
@@ -99,10 +108,10 @@ export function HistoryScreen() {
             <Download className="size-4" /> {t("history.export")}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => window.open("/api/export?format=csv")}>
+            <DropdownMenuItem onClick={() => window.open(`/api/export?format=csv&personId=${encodeURIComponent(personId ?? "")}`)}>
               {t("history.exportCsv")}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => window.open("/api/export?format=json")}>
+            <DropdownMenuItem onClick={() => window.open(`/api/export?format=json&personId=${encodeURIComponent(personId ?? "")}`)}>
               {t("history.exportJson")}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -511,6 +520,7 @@ function DoseList({
   onSelect: (d: DoseDTO) => void;
 }) {
   const t = useTranslations();
+  const { meId } = usePersons();
   const shown = doses.slice(0, 100);
   return (
     <Card className="gap-0 p-0">
@@ -544,6 +554,11 @@ function DoseList({
                   {d.note && (
                     <span className="block truncate text-xs text-muted-foreground">
                       {d.note}
+                    </span>
+                  )}
+                  {d.loggedBy && meId && d.loggedBy.id !== meId && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {t("people.loggedBy", { name: d.loggedBy.name ?? d.loggedBy.email })}
                     </span>
                   )}
                 </span>

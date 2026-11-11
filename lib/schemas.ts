@@ -1,6 +1,19 @@
 import { z } from "zod";
 
+export const personUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  kind: z.enum(["person", "dog", "cat", "other"]).optional(),
+});
+
+export const personSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  kind: z.enum(["person", "dog", "cat", "other"]).default("person"),
+});
+
+export const joinSchema = z.object({ code: z.string().min(4).max(40) });
+
 export const medicineSchema = z.object({
+  personId: z.string().min(1).optional(),
   name: z.string().min(1).max(100),
   form: z
     .enum(["pill", "tablet", "capsule", "spray", "drops", "injection", "liquid", "other"])
@@ -33,4 +46,5 @@ export const profileSchema = z.object({
   wakeWindowH: z.number().min(6).max(24).optional(),
   countUncertain: z.boolean().optional(),
   onboarded: z.boolean().optional(),
+  defaultPersonId: z.string().min(1).optional(),
 });

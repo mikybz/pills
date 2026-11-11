@@ -26,6 +26,8 @@ import {
 import { MedicineDialog } from "@/components/medicine-dialog";
 import { HelpSheet } from "@/components/help-sheet";
 import { api } from "@/lib/client";
+import { PeopleSection } from "@/components/people-section";
+import { usePersons } from "@/components/person-context";
 import { colorClasses, type MedicineDTO, type ProfileDTO } from "@/lib/types";
 import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -33,19 +35,22 @@ import { cn } from "@/lib/utils";
 export function SettingsScreen() {
   const t = useTranslations();
   const locale = useLocale();
+  const { current } = usePersons();
+  const personId = current?.id;
   const [profile, setProfile] = useState<ProfileDTO | null>(null);
   const [medicines, setMedicines] = useState<MedicineDTO[]>([]);
   const [editing, setEditing] = useState<MedicineDTO | null | "new">(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
   const reload = useCallback(async () => {
+    if (!personId) return;
     const [p, m] = await Promise.all([
       api<ProfileDTO>("/api/profile"),
-      api<MedicineDTO[]>("/api/medicines?archived=true"),
+      api<MedicineDTO[]>(`/api/medicines?personId=${encodeURIComponent(personId)}&archived=true`),
     ]);
     setProfile(p);
     setMedicines(m);
-  }, []);
+  }, [personId]);
 
   useEffect(() => {
     reload().catch(() => toast.error(t("common.error")));
@@ -138,11 +143,15 @@ export function SettingsScreen() {
     <div className="space-y-5">
       <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
 
+      <PeopleSection />
+
       {/* Medicines */}
       <section className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-muted-foreground">
-            {t("settings.medicines")}
+            {current
+              ? t("people.medicinesFor", { name: current.name })
+              : t("settings.medicines")}
           </h2>
           <Button size="sm" onClick={() => setEditing("new")}>
             <Plus className="size-4" /> {t("settings.newMedicine")}
@@ -367,6 +376,7 @@ export function SettingsScreen() {
 
       <MedicineDialog
         medicine={editing === "new" ? null : editing}
+        personId={personId}
         open={editing !== null}
         onClose={() => setEditing(null)}
         onChanged={() => {
