@@ -39,16 +39,16 @@ function writeSession(id: string) {
   }
 }
 
+function fetchPersons() {
+  return Promise.all([api<PersonDTO[]>("/api/persons"), api<ProfileDTO>("/api/profile")]);
+}
+
 export function PersonProvider({ children }: { children: React.ReactNode }) {
   const [persons, setPersons] = useState<PersonDTO[]>([]);
   const [defaultPersonId, setDefault] = useState<string | null>(null);
   const [currentId, setCurrentIdState] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    const [list, profile] = await Promise.all([
-      api<PersonDTO[]>("/api/persons"),
-      api<ProfileDTO>("/api/profile"),
-    ]);
+  const apply = useCallback((list: PersonDTO[], profile: ProfileDTO) => {
     setPersons(list);
     setDefault(profile.defaultPersonId);
     setCurrentIdState((prev) => {
@@ -56,12 +56,23 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
       const found = candidates.find((id) => id && list.some((p) => p.id === id));
       return found ?? list.find((p) => p.isSelf)?.id ?? list[0]?.id ?? null;
     });
-    return list;
   }, []);
 
+  const reload = useCallback(async () => {
+    const [list, profile] = await fetchPersons();
+    apply(list, profile);
+    return list;
+  }, [apply]);
+
   useEffect(() => {
-    void reload().catch(() => {});
-  }, [reload]);
+    let alive = true;
+    fetchPersons()
+      .then(([list, profile]) => alive && apply(list, profile))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [apply]);
 
   const setCurrentId = useCallback((id: string) => {
     writeSession(id);

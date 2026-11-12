@@ -73,7 +73,7 @@ export function isTakenStatus(s: DoseStatus) {
   return s === "taken" || s === "uncertain";
 }
 
-export function isScheduled(mode: Mode | null | undefined): mode is "fixed" | "interval" {
+export function isScheduled(mode: string | null | undefined): mode is "fixed" | "interval" {
   return mode === "fixed" || mode === "interval";
 }
 

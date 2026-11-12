@@ -54,7 +54,7 @@ export default async function RootLayout({
         <NextIntlClientProvider>{children}</NextIntlClientProvider>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js"))`,
+            __html: `if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js",{updateViaCache:"none"}))`,
           }}
         />
         <Toaster position="top-center" />

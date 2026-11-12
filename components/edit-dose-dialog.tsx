@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
@@ -13,47 +13,37 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimeField } from "@/components/time-field";
 import { api } from "@/lib/client";
+import { unitLabel } from "@/lib/format";
 import type { DoseDTO, MedicineDTO } from "@/lib/types";
-import type { DoseStatus } from "@/lib/safety";
+import type { DoseStatus } from "@/lib/schedule";
 import { cn } from "@/lib/utils";
 
-function toLocalInputValue(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
+/** Edit or delete a logged dose. Render only while open. */
 export function EditDoseDialog({
   dose,
   medicine,
+  timeZone,
   onClose,
   onChanged,
 }: {
-  dose: DoseDTO | null;
+  dose: DoseDTO;
   medicine: MedicineDTO | null;
+  timeZone: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const t = useTranslations();
-  const [amount, setAmount] = useState("");
-  const [takenAt, setTakenAt] = useState("");
-  const [status, setStatus] = useState<DoseStatus>("taken");
-  const [note, setNote] = useState("");
-
-  useEffect(() => {
-    if (dose) {
-      setAmount(String(dose.amount));
-      setTakenAt(toLocalInputValue(new Date(dose.takenAt)));
-      setStatus(dose.status as DoseStatus);
-      setNote(dose.note ?? "");
-    }
-  }, [dose]);
-
-  if (!dose) return null;
+  const [amount, setAmount] = useState(String(dose.amount));
+  const [takenAt, setTakenAt] = useState(Date.parse(dose.takenAt));
+  const [status, setStatus] = useState<DoseStatus>(dose.status as DoseStatus);
+  const [note, setNote] = useState(dose.note ?? "");
 
   async function save() {
     try {
-      await api(`/api/doses/${dose!.id}`, {
+      // Changing the time re-assigns the slot on the server.
+      await api(`/api/doses/${dose.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           amount: Number(amount),
@@ -71,7 +61,7 @@ export function EditDoseDialog({
 
   async function remove() {
     try {
-      await api(`/api/doses/${dose!.id}`, { method: "DELETE" });
+      await api(`/api/doses/${dose.id}`, { method: "DELETE" });
       toast.success(t("history.deleted"));
       onChanged();
     } catch {
@@ -96,7 +86,7 @@ export function EditDoseDialog({
         <div className="space-y-4">
           <div>
             <Label className="mb-1.5 block">
-              {t("logSheet.amount", { unit: medicine?.unit ?? "" })}
+              {t("logSheet.amount", { unit: medicine ? unitLabel(medicine.unit, t) : "" })}
             </Label>
             <Input
               inputMode="decimal"
@@ -106,11 +96,7 @@ export function EditDoseDialog({
           </div>
           <div>
             <Label className="mb-1.5 block">{t("logSheet.when")}</Label>
-            <Input
-              type="datetime-local"
-              value={takenAt}
-              onChange={(e) => setTakenAt(e.target.value)}
-            />
+            <DateTimeField value={takenAt} onChange={setTakenAt} timeZone={timeZone} />
           </div>
           <div>
             <Label className="mb-1.5 block">{t("logSheet.status")}</Label>
@@ -122,9 +108,7 @@ export function EditDoseDialog({
                   onClick={() => setStatus(s.value)}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-left text-sm",
-                    status === s.value
-                      ? "border-teal-500 bg-teal-500/10 font-medium"
-                      : "border-border",
+                    status === s.value ? "border-teal-500 bg-teal-500/10 font-medium" : "border-border",
                   )}
                 >
                   {s.label}
@@ -142,7 +126,7 @@ export function EditDoseDialog({
             {t("history.delete")}
           </Button>
           <Button className="flex-1" onClick={save}>
-            {t("settings.save")}
+            {t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

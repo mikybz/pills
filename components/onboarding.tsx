@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { ClipboardList, Palette, Pill } from "lucide-react";
+import { BellRing, ListChecks, Pill } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -13,8 +13,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   const steps = [
     { icon: Pill, title: t("step1Title"), body: t("step1Body") },
-    { icon: ClipboardList, title: t("step2Title"), body: t("step2Body") },
-    { icon: Palette, title: t("step3Title"), body: t("step3Body") },
+    { icon: ListChecks, title: t("step2Title"), body: t("step2Body") },
+    { icon: BellRing, title: t("step3Title"), body: t("step3Body") },
   ];
 
   return (
