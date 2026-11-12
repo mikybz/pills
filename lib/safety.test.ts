@@ -1,105 +1,132 @@
 import { describe, expect, it } from "vitest";
-import { evaluateDose, requiredGapMs, type DoseEntry, type SafetyConfig } from "./safety";
+import { asNeededStatus, checkDose, LIMIT_WINDOW_MS, type Limits } from "./safety";
+import { HOUR, MIN, type LogEntry, type Schedule } from "./schedule";
+import { zonedToUtc } from "./tz";
 
-const cfg: SafetyConfig = { maxPerIntake: 1, maxPerDay: 3 }; // the example from the plan
-
-const T0 = new Date("2026-01-01T08:00:00Z");
-const h = (n: number) => new Date(T0.getTime() + n * 3_600_000);
-const dose = (amount: number, at: Date, status: DoseEntry["status"] = "taken"): DoseEntry => ({
-  amount,
-  takenAt: at,
+const TZ = "Europe/Oslo";
+const at = (date: string, time: string) => zonedToUtc(date, time, TZ);
+const asNeeded: Schedule = {
+  mode: "asNeeded",
+  times: [],
+  intervalH: null,
+  startsOn: null,
+  endsOn: null,
+  minIntervalMin: null,
+  timezone: TZ,
+};
+const dose = (takenAt: number, status: LogEntry["status"] = "taken", amount = 1): LogEntry => ({
+  takenAt,
+  slotAt: null,
   status,
+  amount,
+});
+const check = (limits: Partial<Limits>, logs: LogEntry[], when: number, amount = 1, countUncertain = true) =>
+  checkDose({
+    schedule: asNeeded,
+    limits: { maxPerIntake: null, maxPerDay: null, minIntervalMin: null, ...limits },
+    logs,
+    req: { amount, at: when, status: "taken", slotAt: null },
+    countUncertain,
+  });
+
+describe("as needed", () => {
+  it("the limit window is 24 h minus 4 h slack", () => {
+    expect(LIMIT_WINDOW_MS).toBe(20 * HOUR);
+  });
+
+  it("9. max 3: doses at 08, 14, 20, then 06:00 the next day is fine; a fourth at 23:00 the same day warns", () => {
+    const logs = [dose(at("2026-01-15", "08:00")), dose(at("2026-01-15", "14:00")), dose(at("2026-01-15", "20:00"))];
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-16", "06:00")).level).toBe("ok");
+    const r = check({ maxPerDay: 3 }, logs, at("2026-01-15", "23:00"));
+    expect(r.level).toBe("warn");
+    expect(r.reasons).toEqual([{ code: "overDaily", used: 3, amount: 1, max: 3, windowH: 20 }]);
+  });
+
+  it("a dose taken at 08:00 stops counting at 04:00 the next day", () => {
+    const logs = [dose(at("2026-01-15", "08:00"), "taken", 3)];
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-16", "03:59")).level).toBe("warn");
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-16", "04:00")).level).toBe("ok");
+  });
+
+  it("warns above max per intake", () => {
+    expect(check({ maxPerIntake: 1 }, [], 0, 1).level).toBe("ok");
+    expect(check({ maxPerIntake: 1 }, [], 0, 1.5).reasons[0]).toEqual({ code: "overIntake", amount: 1.5, max: 1 });
+  });
+
+  it("warns when the last dose is less than the minimum interval ago", () => {
+    const logs = [dose(at("2026-01-15", "08:00"))];
+    expect(check({ minIntervalMin: 240 }, logs, at("2026-01-15", "11:59")).reasons[0].code).toBe("tooSoon");
+    expect(check({ minIntervalMin: 240 }, logs, at("2026-01-15", "12:00")).level).toBe("ok");
+  });
+
+  it("there is no 'approaching the limit' warning", () => {
+    const logs = [dose(at("2026-01-15", "08:00")), dose(at("2026-01-15", "14:00"))];
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-15", "20:00")).level).toBe("ok");
+  });
+
+  it("uncertain counts by default; not when the setting is off; skipped never counts", () => {
+    const logs = [dose(at("2026-01-15", "08:00"), "uncertain", 3)];
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-15", "09:00")).level).toBe("warn");
+    expect(check({ maxPerDay: 3 }, logs, at("2026-01-15", "09:00"), 1, false).level).toBe("ok");
+    expect(check({ maxPerDay: 3 }, [dose(at("2026-01-15", "08:00"), "skipped", 3)], at("2026-01-15", "09:00")).level).toBe("ok");
+  });
+
+  it("a skip is never checked", () => {
+    const r = checkDose({
+      schedule: asNeeded,
+      limits: { maxPerIntake: 1, maxPerDay: 1, minIntervalMin: 600 },
+      logs: [dose(at("2026-01-15", "08:00"))],
+      req: { amount: 5, at: at("2026-01-15", "08:01"), status: "skipped", slotAt: null },
+      countUncertain: true,
+    });
+    expect(r.level).toBe("ok");
+  });
+
+  it("status line: used, and when the next dose is free", () => {
+    const limits = { maxPerIntake: null, maxPerDay: 3, minIntervalMin: 240 };
+    const logs = [dose(at("2026-01-15", "08:00")), dose(at("2026-01-15", "14:00")), dose(at("2026-01-15", "20:00"))];
+    const s = asNeededStatus(limits, logs, at("2026-01-15", "21:00"), 1, true);
+    expect(s.used).toBe(3);
+    expect(s.max).toBe(3);
+    expect(s.lastAt).toBe(at("2026-01-15", "20:00"));
+    expect(s.nextFreeAt).toBe(at("2026-01-16", "04:00"));
+    const s2 = asNeededStatus(limits, logs.slice(0, 1), at("2026-01-15", "09:00"), 1, true);
+    expect(s2.nextFreeAt).toBe(at("2026-01-15", "12:00"));
+    expect(asNeededStatus(limits, [], at("2026-01-15", "09:00"), 1, true).nextFreeAt).toBeNull();
+  });
 });
 
-describe("requiredGapMs", () => {
-  it("computes ~3.4h gap for 1mg with 3mg/day over 12h window and 15% slack", () => {
-    expect(requiredGapMs(1, cfg)! / 3_600_000).toBeCloseTo(3.4, 1);
-  });
-  it("halves the gap for half the dose", () => {
-    expect(requiredGapMs(0.5, cfg)! / 3_600_000).toBeCloseTo(1.7, 1);
-  });
-  it("returns null without a daily max", () => {
-    expect(requiredGapMs(1, { maxPerIntake: 1 })).toBeNull();
-  });
-});
+describe("scheduled", () => {
+  const twice: Schedule = { ...asNeeded, mode: "fixed", times: ["08:00", "20:00"] };
+  const slot = at("2026-01-15", "08:00");
+  const run = (logs: LogEntry[], when: number, slotAt: number | null, s = twice) =>
+    checkDose({
+      schedule: s,
+      limits: { maxPerIntake: 1, maxPerDay: 1, minIntervalMin: null },
+      logs,
+      req: { amount: 1, at: when, status: "taken", slotAt },
+      countUncertain: false,
+    });
 
-describe("evaluateDose", () => {
-  it("is green with no history", () => {
-    expect(evaluateDose(cfg, [], 1, T0).level).toBe("green");
-  });
-
-  it("is yellow when re-dosing 1mg too soon after 1mg", () => {
-    const r = evaluateDose(cfg, [dose(1, T0)], 1, h(2));
-    expect(r.level).toBe("yellow");
-    expect(r.nextOkAt).not.toBeNull();
+  it("ignores daily max and per-intake limits", () => {
+    expect(run([dose(at("2026-01-14", "20:00"))], slot, slot).level).toBe("ok");
   });
 
-  it("is green when re-dosing 1mg after the required gap (~3.5h)", () => {
-    expect(evaluateDose(cfg, [dose(1, T0)], 1, h(3.5)).level).toBe("green");
+  it("warns when the previous dose is less than minGap (half the gap) ago", () => {
+    const evening = at("2026-01-15", "20:00");
+    const logs = [{ ...dose(slot), slotAt: slot }];
+    expect(run(logs, at("2026-01-15", "13:59"), evening).reasons[0]).toMatchObject({ code: "tooSoon", minGapMin: 360 });
+    expect(run(logs, at("2026-01-15", "14:00"), evening).level).toBe("ok");
   });
 
-  it("allows 0.5mg sooner than 1mg", () => {
-    expect(evaluateDose(cfg, [dose(1, T0)], 0.5, h(2)).level).toBe("green");
+  it("an uncertain log in the slot warns even with countUncertain off", () => {
+    const logs = [{ ...dose(slot, "uncertain"), slotAt: slot }];
+    expect(run(logs, slot + 30 * MIN, slot).reasons).toEqual([{ code: "slotLogged", takenAt: slot }]);
   });
 
-  it("is red when exceeding the daily max in 24h", () => {
-    const r = evaluateDose(cfg, [dose(1, T0), dose(1, h(4)), dose(1, h(8))], 1, h(12));
-    expect(r.level).toBe("red");
-    expect(r.reasons.some((x) => x.key === "safety.overDaily")).toBe(true);
-  });
-
-  it("warns while yesterday's doses are still inside the rolling 24h window", () => {
-    const r = evaluateDose(cfg, [dose(1, T0), dose(1, h(4)), dose(1, h(8))], 1, h(25));
-    expect(r.level).toBe("yellow");
-  });
-
-  it("frees up daily budget once doses fall out of the rolling 24h window", () => {
-    const r = evaluateDose(cfg, [dose(1, T0), dose(1, h(4)), dose(1, h(8))], 1, h(33));
-    expect(r.level).toBe("green");
-  });
-
-  it("is yellow slightly over max per intake, red far over", () => {
-    expect(evaluateDose(cfg, [], 1.05, T0).level).toBe("yellow");
-    expect(evaluateDose(cfg, [], 1.5, T0).level).toBe("red");
-  });
-
-  it("never returns a nextOkAt for a hard per-intake breach", () => {
-    expect(evaluateDose(cfg, [], 1.5, T0).nextOkAt).toBeNull();
-  });
-
-  it("is yellow when approaching the daily max", () => {
-    const r = evaluateDose(cfg, [dose(1, T0), dose(0.75, h(4))], 1, h(9));
-    expect(r.level).toBe("yellow");
-    expect(r.reasons.some((x) => x.key === "safety.nearDaily")).toBe(true);
-  });
-
-  it("respects an explicit minimum interval override", () => {
-    const c = { ...cfg, minIntervalMin: 240 };
-    expect(evaluateDose(c, [dose(0.5, T0)], 0.5, h(1)).level).toBe("red");
-    expect(evaluateDose(c, [dose(0.5, T0)], 0.5, h(3.9)).level).toBe("yellow");
-    expect(evaluateDose(c, [dose(0.5, T0)], 0.5, h(4.1)).level).toBe("green");
-  });
-
-  it("counts uncertain doses by default but not when disabled", () => {
-    const doses = [dose(1, T0, "uncertain")];
-    expect(evaluateDose(cfg, doses, 1, h(1)).level).toBe("yellow");
-    expect(evaluateDose({ ...cfg, countUncertain: false }, doses, 1, h(1)).level).toBe("green");
-  });
-
-  it("ignores skipped doses", () => {
-    expect(evaluateDose(cfg, [dose(1, T0, "skipped")], 1, h(0.5)).level).toBe("green");
-  });
-
-  it("nextOkAt lands where the dose actually becomes green", () => {
-    const r = evaluateDose(cfg, [dose(1, T0)], 1, h(1));
-    expect(r.nextOkAt).not.toBeNull();
-    expect(evaluateDose(cfg, [dose(1, T0)], 1, r.nextOkAt!).level).toBe("green");
-    const gapH = (r.nextOkAt!.getTime() - T0.getTime()) / 3_600_000;
-    expect(gapH).toBeGreaterThan(3);
-    expect(gapH).toBeLessThan(4);
-  });
-
-  it("works with no limits configured (always green)", () => {
-    expect(evaluateDose({}, [dose(5, T0)], 5, h(0.1)).level).toBe("green");
+  it("a doctor's minimum gap overrides half the gap", () => {
+    const s = { ...twice, minIntervalMin: 600 };
+    const logs = [{ ...dose(slot), slotAt: slot }];
+    expect(run(logs, at("2026-01-15", "17:00"), at("2026-01-15", "20:00"), s).level).toBe("warn");
   });
 });
