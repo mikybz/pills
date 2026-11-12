@@ -64,11 +64,14 @@
   },
   "warning": {
     "title": "Before you log {name}",
-    "slotLogged": "This dose is already logged: you took it at {time}, {ago} ago.",
-    "tooSoon": "You took it at {time}, {ago} ago. Doses should be at least {gap} apart.",
+    "slotLogged": "This dose is already logged: you took it at {time} ({ago}).",
+    "tooSoon": "You took it at {time} ({ago}). Doses should be at least {gap} apart.",
     "overIntake": "{amount} is more than the max per intake ({max}).",
     "overDaily": "That makes {total} in the last {hours} hours. Your max is {max} per day.",
-    "logAnyway": "Log anyway"
+    "logAnyway": "Log anyway",
+    "afterTheFact": "Logged — but {name} looks like it was already taken. Undo if this was a double tap.",
+    "ago": "{duration} ago",
+    "justNow": "just now"
   },
   "describe": {
     "fixed": "{count, plural, =1 {Once a day} =2 {Twice a day} other {# times a day}}, {times}",

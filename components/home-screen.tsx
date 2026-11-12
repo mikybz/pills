@@ -384,6 +384,7 @@ export function HomeScreen() {
                 timeZone={timeZone}
                 loggedBy={loggedByOther(log.id)}
                 onEdit={() => dose && setEditing(dose)}
+                onMore={() => setSheet({ medicine: m, slotAt: log.slotAt ?? undefined })}
               />
             );
           })}

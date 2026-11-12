@@ -64,11 +64,14 @@
   },
   "warning": {
     "title": "Før du registrerer {name}",
-    "slotLogged": "Denne dosen er allerede registrert: du tok den kl. {time}, for {ago} siden.",
-    "tooSoon": "Du tok den kl. {time}, for {ago} siden. Det bør være minst {gap} mellom dosene.",
+    "slotLogged": "Denne dosen er allerede registrert: du tok den kl. {time} ({ago}).",
+    "tooSoon": "Du tok den kl. {time} ({ago}). Det bør være minst {gap} mellom dosene.",
     "overIntake": "{amount} er mer enn maks per gang ({max}).",
     "overDaily": "Det blir {total} de siste {hours} timene. Maks er {max} per dag.",
-    "logAnyway": "Registrer likevel"
+    "logAnyway": "Registrer likevel",
+    "afterTheFact": "Registrert — men {name} ser ut til å være tatt allerede. Angre hvis dette var et dobbelt trykk.",
+    "ago": "for {duration} siden",
+    "justNow": "akkurat nå"
   },
   "describe": {
     "fixed": "{count, plural, =1 {Én gang om dagen} =2 {To ganger om dagen} other {# ganger om dagen}}, {times}",

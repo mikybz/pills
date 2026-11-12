@@ -33,7 +33,7 @@ import { api } from "@/lib/client";
 import { describeSchedule } from "@/lib/describe";
 import { usePushSupport } from "@/lib/push-client";
 import { isFinished } from "@/lib/schedule";
-import { colorClasses, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
+import { colorClasses, MEDICINE_COLORS, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
@@ -304,6 +304,10 @@ export function SettingsScreen() {
           personId={personId}
           timeZone={timeZone}
           showReminderSwitch={support === "supported" && profile.remindersOn}
+          defaultColor={
+            MEDICINE_COLORS.find((c) => !active.some((m) => m.color === c)) ??
+            MEDICINE_COLORS[active.length % MEDICINE_COLORS.length]
+          }
           onClose={() => setEditing(null)}
           onChanged={() => {
             setEditing(null);

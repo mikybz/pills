@@ -43,14 +43,17 @@ export function WarningDialog({
       ? formatTime(at, locale, timeZone)
       : formatDateTime(at, locale, timeZone);
 
+  const ago = (at: number) =>
+    now - at < 60_000 ? t("warning.justNow") : t("warning.ago", { duration: formatDuration(now - at, t) });
+
   function line(r: Reason) {
     switch (r.code) {
       case "slotLogged":
-        return t("warning.slotLogged", { time: when(r.takenAt), ago: formatDuration(now - r.takenAt, t) });
+        return t("warning.slotLogged", { time: when(r.takenAt), ago: ago(r.takenAt) });
       case "tooSoon":
         return t("warning.tooSoon", {
           time: when(r.takenAt),
-          ago: formatDuration(now - r.takenAt, t),
+          ago: ago(r.takenAt),
           gap: formatDuration(r.minGapMin * 60_000, t),
         });
       case "overIntake":

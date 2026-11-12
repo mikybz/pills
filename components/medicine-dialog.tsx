@@ -54,7 +54,7 @@ type Course = "none" | "days" | "date";
 const num = (s: string) => Number(s.replace(",", "."));
 const optNum = (s: string) => (s.trim() === "" ? null : num(s));
 
-function initialState(m: MedicineDTO | null) {
+function initialState(m: MedicineDTO | null, defaultColor: string) {
   const times = sortTimes(parseTimes(m?.times));
   let freq: Freq = "1";
   let everyH = "8";
@@ -90,7 +90,7 @@ function initialState(m: MedicineDTO | null) {
     endsOn: m?.endsOn ?? "",
     remindersEnabled: m?.remindersEnabled ?? true,
     form: m?.form ?? "pill",
-    color: m?.color ?? "blue",
+    color: m?.color ?? defaultColor,
     notes: m?.notes ?? "",
   };
 }
@@ -104,6 +104,7 @@ export function MedicineDialog({
   personId,
   timeZone,
   showReminderSwitch,
+  defaultColor = "blue",
   onClose,
   onChanged,
 }: {
@@ -113,13 +114,15 @@ export function MedicineDialog({
   timeZone: string;
   /** Hidden on devices that cannot show notifications (no dead settings). */
   showReminderSwitch: boolean;
+  /** Color for a new medicine (the first one not used yet). */
+  defaultColor?: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const now = useNow();
-  const [s, setS] = useState(() => initialState(medicine));
+  const [s, setS] = useState(() => initialState(medicine, defaultColor));
   const [more, setMore] = useState(false);
   const [shiftBy, setShiftBy] = useState<number | null>(null);
   const set = <K extends keyof typeof s>(k: K, v: (typeof s)[K]) => setS((p) => ({ ...p, [k]: v }));

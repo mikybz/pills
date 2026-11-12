@@ -39,7 +39,7 @@ export function useDoseLogger({
   const [pending, setPending] = useState<Pending | null>(null);
 
   const persist = useCallback(
-    async (medicine: MedicineDTO, req: LogRequest & { takenAt: number }) => {
+    async (medicine: MedicineDTO, req: LogRequest & { takenAt: number }, confirmed = false) => {
       try {
         const res = await api<LogResponse>("/api/doses", {
           method: "POST",
@@ -60,11 +60,17 @@ export function useDoseLogger({
             (medicineId === medicine.id && logged.slotAt !== null && Date.parse(logged.slotAt) === slotAt) ||
             logsFor(medicineId).some((l) => l.slotAt === slotAt),
         ).catch(() => {});
-        const message =
-          req.status === "skipped"
+        // The server re-checks with fresh data (e.g. another user just logged it).
+        const serverWarning =
+          !confirmed && res.check.level === "warn" && res.check.reasons[0]?.code !== "overIntake"
+            ? res.check.reasons[0]
+            : null;
+        const message = serverWarning
+          ? t("warning.afterTheFact", { name: medicine.name })
+          : req.status === "skipped"
             ? t("home.skippedToast", { name: medicine.name })
             : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
-        toast.success(message, {
+        (serverWarning ? toast.warning : toast.success)(message, {
           duration: 8000,
           action: {
             label: t("home.undo"),
@@ -127,7 +133,7 @@ export function useDoseLogger({
       medicine={pending.medicine}
       timeZone={timeZone}
       onConfirm={() => {
-        void persist(pending.medicine, pending.req);
+        void persist(pending.medicine, pending.req, true);
         setPending(null);
       }}
       onCancel={() => setPending(null)}

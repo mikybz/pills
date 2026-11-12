@@ -57,7 +57,7 @@ function Name({ medicine, sub }: { medicine: MedicineDTO; sub?: React.ReactNode 
       <span className={cn("h-8 w-1 shrink-0 rounded-full", colors.dot)} aria-hidden />
       <span className="min-w-0">
         <span className="block truncate font-medium">{medicine.name}</span>
-        <span className="block truncate text-xs text-muted-foreground">
+        <span className="block text-xs text-muted-foreground">
           {formatDose(doseAmountOf(medicine), medicine.unit, t)}
           {sub && <> · {sub}</>}
         </span>
@@ -190,22 +190,24 @@ export function DoneRow({
   timeZone,
   loggedBy,
   onEdit,
+  onMore,
 }: {
   medicine: MedicineDTO;
   log: LogEntry;
   timeZone: string;
   loggedBy: string | null;
   onEdit: () => void;
+  onMore: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const skipped = log.status === "skipped";
   return (
-    <li>
+    <li className="flex items-center pr-2">
       <button
         type="button"
         onClick={onEdit}
-        className="flex w-full items-center gap-3 py-2.5 pl-4 pr-4 text-left hover:bg-accent/50"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 pr-2 text-left hover:bg-accent/50"
       >
         <span className="w-12 shrink-0 text-sm tabular-nums text-muted-foreground">
           {formatTime(log.takenAt, locale, timeZone)}
@@ -231,6 +233,7 @@ export function DoneRow({
           </span>
         </span>
       </button>
+      <MoreButton onClick={onMore} />
     </li>
   );
 }

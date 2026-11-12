@@ -30,6 +30,8 @@ export async function POST(req: NextRequest) {
     if (problem) return badRequest(problem);
     const personId = await resolvePersonId(user, parsed.data.personId);
     if (!personId) return notFound();
+    // New medicines go to the end of the list.
+    const last = await prisma.medicine.aggregate({ where: { personId }, _max: { sortOrder: true } });
     const medicine = await prisma.medicine.create({
       data: {
         ...(toMedicineData(parsed.data) as object),
@@ -37,6 +39,7 @@ export async function POST(req: NextRequest) {
         mode: parsed.data.mode,
         presets: JSON.stringify(parsed.data.presets),
         personId,
+        sortOrder: parsed.data.sortOrder ?? (last._max.sortOrder ?? -1) + 1,
         // A new medicine's schedule is set by the user, so it counts as reviewed.
         scheduleReviewedAt: new Date(),
       },
