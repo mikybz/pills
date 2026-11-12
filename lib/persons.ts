@@ -16,7 +16,7 @@ export async function ensureSelfPerson(user: User) {
       kind: "person",
       selfOfUserId: user.id,
       createdById: user.id,
-      access: { create: { userId: user.id } },
+      access: { create: { userId: user.id, reminders: true } },
     },
   });
   if (!user.defaultPersonId) {
@@ -36,6 +36,14 @@ export async function hasPersonAccess(userId: string, personId: string) {
 export function findAccessibleMedicine(userId: string, medicineId: string) {
   return prisma.medicine.findFirst({
     where: { id: medicineId, person: { access: { some: { userId } } } },
+  });
+}
+
+/** Same, with the person's timezone (needed for any schedule math). */
+export function findAccessibleMedicineWithPerson(userId: string, medicineId: string) {
+  return prisma.medicine.findFirst({
+    where: { id: medicineId, person: { access: { some: { userId } } } },
+    include: { person: { select: { id: true, timezone: true } } },
   });
 }
 
@@ -91,6 +99,8 @@ export function toPersonDTO(user: User, p: NonNullable<PersonWithAccess>): Perso
     id: p.id,
     name: p.name,
     kind: p.kind,
+    timezone: p.timezone,
+    reminders: p.access.find((a) => a.userId === user.id)?.reminders ?? false,
     isSelf: p.selfOfUserId === user.id,
     isOtherUsersSelf: p.selfOfUserId !== null && p.selfOfUserId !== user.id,
     canDelete: p.selfOfUserId === null && p.createdById === user.id,

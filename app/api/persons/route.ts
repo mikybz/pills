@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
       data: {
         ...parsed.data,
         createdById: user.id,
-        access: { create: { userId: user.id } },
+        access: { create: { userId: user.id } }, // reminders off by default for others
       },
     });
     const person = await getPersonWithAccess(created.id);

@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withUser, notFound } from "@/lib/api";
 import { resolvePersonId } from "@/lib/persons";
+import { historySlots } from "@/lib/schedule";
+import { doseAmountOf, segmentsOf, toLogEntries, type MedicineDTO } from "@/lib/types";
+
+interface Row {
+  medicine: string;
+  mode: string;
+  amount: number;
+  unit: string;
+  takenAt: string | null;
+  slotAt: string | null;
+  status: string;
+  note: string | null;
+  loggedBy: string | null;
+}
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -9,27 +23,56 @@ export async function GET(req: NextRequest) {
     const personId = await resolvePersonId(user, req.nextUrl.searchParams.get("personId"));
     if (!personId) return notFound();
     const person = await prisma.person.findUnique({ where: { id: personId } });
-    const slug = (person?.name ?? "export").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const doses = await prisma.doseLog.findMany({
-      where: { medicine: { personId } },
+    if (!person) return notFound();
+    const slug = person.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "export";
+    const medicines = await prisma.medicine.findMany({
+      where: { personId },
       include: {
-        medicine: { select: { name: true, unit: true } },
-        user: { select: { name: true, email: true } },
+        scheduleVersions: true,
+        doses: { include: { user: { select: { name: true, email: true } } } },
       },
-      orderBy: { takenAt: "asc" },
     });
 
+    const now = Date.now();
+    const rows: Row[] = [];
+    for (const m of medicines) {
+      const mode = m.mode ?? "asNeeded";
+      for (const d of m.doses) {
+        rows.push({
+          medicine: m.name,
+          mode,
+          amount: d.amount,
+          unit: m.unit,
+          takenAt: d.takenAt.toISOString(),
+          slotAt: d.slotAt?.toISOString() ?? null,
+          status: d.status,
+          note: d.note,
+          loggedBy: d.user.name ?? d.user.email,
+        });
+      }
+      // Missed slots are derived, not stored: add them as rows with status "missed".
+      const dto = JSON.parse(JSON.stringify(m)) as MedicineDTO;
+      const slots = historySlots(segmentsOf(dto, person.timezone, now), toLogEntries(m.doses, m), 0, now, now);
+      for (const s of slots) {
+        if (s.state !== "missed") continue;
+        rows.push({
+          medicine: m.name,
+          mode,
+          amount: doseAmountOf(m),
+          unit: m.unit,
+          takenAt: null,
+          slotAt: new Date(s.slotAt).toISOString(),
+          status: "missed",
+          note: null,
+          loggedBy: null,
+        });
+      }
+    }
+    const sortKey = (r: Row) => r.takenAt ?? r.slotAt ?? "";
+    rows.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+
     if (format === "json") {
-      const data = doses.map((d) => ({
-        medicine: d.medicine.name,
-        amount: d.amount,
-        unit: d.medicine.unit,
-        takenAt: d.takenAt.toISOString(),
-        status: d.status,
-        note: d.note,
-        loggedBy: d.user.name ?? d.user.email,
-      }));
-      return new NextResponse(JSON.stringify(data, null, 2), {
+      return new NextResponse(JSON.stringify(rows, null, 2), {
         headers: {
           "Content-Type": "application/json",
           "Content-Disposition": `attachment; filename="pills-${slug}.json"`,
@@ -38,21 +81,23 @@ export async function GET(req: NextRequest) {
     }
 
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const rows = [
-      "medicine,amount,unit,taken_at,status,note,logged_by",
-      ...doses.map((d) =>
+    const csv = [
+      "medicine,mode,amount,unit,taken_at,slot_at,status,note,logged_by",
+      ...rows.map((r) =>
         [
-          esc(d.medicine.name),
-          d.amount,
-          d.medicine.unit,
-          d.takenAt.toISOString(),
-          d.status,
-          esc(d.note ?? ""),
-          esc(d.user.name ?? d.user.email),
+          esc(r.medicine),
+          r.mode,
+          r.amount,
+          r.unit,
+          r.takenAt ?? "",
+          r.slotAt ?? "",
+          r.status,
+          esc(r.note ?? ""),
+          esc(r.loggedBy ?? ""),
         ].join(","),
       ),
     ];
-    return new NextResponse(rows.join("\n") + "\n", {
+    return new NextResponse(csv.join("\n") + "\n", {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="pills-${slug}.csv"`,

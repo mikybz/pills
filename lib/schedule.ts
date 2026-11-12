@@ -295,9 +295,9 @@ export function assignSlot(
   logs: LogEntry[],
   at: number,
   now: number,
-  opts: { leadMin: number; anchor: number },
+  opts: { leadMin: number; anchor: number; rule?: "auto" | "window" },
 ): number | null {
-  const tap = Math.abs(now - at) <= TAP_TOLERANCE_MS;
+  const tap = opts.rule !== "window" && Math.abs(now - at) <= TAP_TOLERANCE_MS;
   if (s.mode === "interval") {
     return tap ? intervalNextDue(s, logs, opts.anchor) : intervalNextDue(s, logs, opts.anchor, at);
   }
