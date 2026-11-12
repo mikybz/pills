@@ -1,7 +1,8 @@
 # Pills — Personal Medicine Logging App
 
-A super-simple, modern web app for manually logging medicine intake. The core promise:
-**"Did I take my pill? Open the app — you'll know in one second, and logging takes two taps."**
+A super-simple, modern web app that reminds people to take their medicine and records that
+they did — including people who forget easily (ADHD). The core promise:
+**"What do I take now, and did I take it? Open the app — you'll know in one second."**
 
 Target: 1–5 medicines per user, installable as a PWA on phone/PC, English + Norwegian,
 deployed on valensendstad.no behind Authentik SSO.
@@ -10,38 +11,30 @@ deployed on valensendstad.no behind Authentik SSO.
 
 ## 1. Core user flows
 
-### 1.1 Log a dose (the 2-tap happy path)
-1. Open the app (PWA icon on home screen).
-2. Home screen shows one card per medicine with big preset-dose buttons
-   (e.g. `0.5 mg` `1 mg` `2 mg`).
-3. Tap a preset → dose is logged **now** with a subtle confirmation (undo toast, 8 s).
+> Sections 1.1–1.3, 1.5 and 2 were rewritten on 2026-11-12 (schedules + reminders). The
+> design notes behind them are in REWRITE.md.
 
-Before logging, the safety algorithm evaluates the dose. Buttons are *color-hinted live*:
-- **Green/neutral** — fine to take.
-- **Yellow** — soft warning; tapping shows a confirm sheet ("You're a bit early / this is
-  above your usual dose — take anyway?").
-- **Red** — hard warning; tapping shows a strong confirm sheet with explanation and the
-  time when it becomes OK. User can still log it (we never block — reality wins over the
-  app), but must confirm explicitly.
+### 1.1 Today's checklist (home)
+The home screen is a checklist for today, ordered by time:
+- **Due now** — due and overdue slots, oldest first, including yesterday's overdue slots
+  until their cutoff. Overdue rows say "1 h 20 min late". One tap on **Take** logs it now,
+  with an 8-second undo toast.
+- **Missed** — only when a slot passed its cutoff today: **Take late anyway** / **Skip**.
+- **Later today** — upcoming slots until local midnight; tapping offers **Take now (early)**.
+- **Done** — today's taken / skipped logs with the actual time (tap to edit).
+- **As needed** — one card per as-needed medicine: quick-dose buttons, last intake, and the
+  limit as facts ("2 of 3 used · next free at 14:30").
+- A pushed slot shows its effective time with the original struck through. "All done for
+  today" when nothing is left. The list re-evaluates every minute and on focus.
 
-### 1.2 Custom amount / custom time
-Each medicine card has a `⋯` (more) button opening a sheet with:
-- **Custom amount** — numeric stepper + free input.
-- **Taken earlier** — datetime picker (defaults to now, quick chips: "-15 min", "-1 h",
-  "-2 h", "this morning").
-- **Not sure I took it** — logs an *uncertain* dose (flagged, shown hatched/faded in
-  history, excluded or included in safety math per user setting — default: included,
-  safest assumption).
-- **Skipped dose** — explicitly record that a scheduled dose was intentionally skipped.
-- **Note** — optional free-text note on the dose (e.g. "headache", "before flight").
+### 1.2 The ⋯ log sheet
+Every row's `⋯` opens the log sheet: custom amount, **taken earlier** (chips −15 min /
+−1 h / −2 h or a date + 24 h time field), **not sure I took it** (uncertain), **skipped**,
+and a note.
 
-### 1.3 See what happened (glanceability)
-The home screen answers "did I take it?" without any tap:
-- Each medicine card shows **"Last taken: 2 h ago (1 mg)"** and a mini 24-h timeline dots
-  strip.
-- **Next dose hint**: "Next OK from 14:30" / "OK now" computed from the safety algorithm.
-- A **Today** ribbon at the top: total per medicine today vs. max per day
-  (e.g. `2 / 3 mg` with a progress bar that turns yellow near the max).
+### 1.3 Warnings
+One confirm sheet, one level. It states the fact ("You took it at 08:05 (40 min ago)") and
+offers **Log anyway** / **Cancel**. The app never blocks logging. See §2.4.
 
 ### 1.4 History & statistics
 A **History** tab with timescale switcher: `3 days · Week · Month · Year · All`.
@@ -53,61 +46,99 @@ A **History** tab with timescale switcher: `3 days · Week · Month · Year · A
 - **Export**: CSV / JSON download of the log (for doctors or backup).
 
 ### 1.5 Manage medicines
-Settings → Medicines: create/edit/archive (never hard-delete while logs exist).
-Per medicine:
-- Name, form (pill, tablet, capsule, spray, drops, injection, liquid, other), strength
-  unit (mg, µg, g, ml, IU, puffs, pieces), color + icon (for instant recognition).
-- **Preset doses** (1–4 quick buttons, e.g. 0.5 / 1 / 2 mg) and default preset.
-- **Max per intake** (optional), **Max per day** (optional) → drives the safety algorithm.
-- Optional **minimum interval override** (if the doctor said "at least X hours apart",
-  that beats the computed interval).
-- Optional **daily schedule hints** (e.g. "morning + evening") used for the "suggested
-  next time" and future reminders.
-- Notes field (free text, e.g. prescription info).
+Settings → Medicines: create / edit / archive (never hard-delete while logs exist).
+The add form is simple-first: **name**, **how often?** (Once / Twice / 3 times / 4 times a
+day · Every … hours · As needed), **dose** (default `1` tablet). Times-a-day chips create
+fixed times (08:00 · 08:00, 20:00 · 07:00, 15:00, 23:00 · 06:00, 12:00, 18:00, 00:00), all
+editable; changing the first offers to shift the others. "Every … hours" asks for the hours
+and **At fixed times** (recommended; when 24 divides evenly) or **Count from when I last
+took it** (interval). Night-time doses (23:00–06:00) get a plain hint.
+**More options**: course length (N days / end date), reminders on/off, minimum gap (hours),
+color, form, presets + max per intake (as needed), notes. Editing a schedule applies from
+now on; history keeps the old schedule (`ScheduleVersion`).
+
+Existing medicines (before schedules) get an auto-guessed schedule on first open
+(`POST /api/persons/:id/migrate`), confirmed per medicine on a one-time review screen
+(then a banner until done). Unconfirmed medicines send no reminders and derive no missed
+doses.
 
 ---
 
-## 2. The safety algorithm (yellow/red warnings)
+## 2. Scheduling, warnings and reminders
 
-Inputs per medicine: `maxPerIntake` (M_i), `maxPerDay` (M_d), optional
-`minIntervalOverride`, and the rolling log.
+All timing lives in pure modules (`lib/schedule.ts`, `lib/safety.ts`, `lib/tz.ts`) used by
+the client, the API and the reminder tick alike.
 
-**Idea:** if you may take at most `M_d` per rolling 24 h, then a dose of `a` "occupies"
-`a / M_d × 24 h` of budget. Linear model with slack.
+### 2.1 Modes
+| Mode | Stored as | Next dose is |
+|---|---|---|
+| `fixed` | `times: ["08:00","20:00"]`, wall clock in `Person.timezone` | the next clock time |
+| `interval` | `intervalH: 8` | last intake + interval (a skip advances from its `slotAt`) |
+| `asNeeded` | optional `maxPerDay`, `minIntervalMin`, `maxPerIntake` | no schedule |
 
-Definitions (rolling 24-hour window, not calendar day, to avoid midnight abuse):
-- `used24 = Σ amounts in last 24 h` (uncertain doses count by default).
-- `budgetLeft = M_d − used24`.
-- **Required spacing** for a dose of amount `a`:
-  `requiredGap(a) = (a / M_d) × 24 h × (1 − slack)` where `slack = 0.15` by default
-  (user-tunable "strictness" setting: relaxed 0.25 / normal 0.15 / strict 0).
-  Example: M_i = 1 mg, M_d = 3 mg → full dose gap = 8 h × 0.85 ≈ 6.8 h… but the user's
-  example expects ~3.5 h for 1 mg with 3 mg/day. So the spacing is computed against the
-  *whole day's* dosing capacity: with `M_d / M_i = 3` intakes across the waking window.
-  We therefore use the **wake window** `W` (default 17 h, configurable, e.g. 07–24):
-  `requiredGap(a) = (a / M_d) × W × (1 − slack)`.
-  With W = 17 h, slack 0.15: 1 mg → 17/3 × 0.85 ≈ **4.8 h**; 0.5 mg → **2.4 h**.
-  With W = 14 h it's ≈ 4.0/2.0 h. (The 3.5 h in the idea sits in this range; W and slack
-  are user-tunable per profile.)
-- Effectively each past dose "releases" budget linearly: dose `a_k` taken at `t_k` still
-  occupies `a_k × max(0, 1 − (now − t_k)/requiredGap(a_k))` of "recent load".
-  `recentLoad = Σ occupied` and a new dose `a` is:
-  - **RED** if `a > M_i` (with slack: `a > M_i × 1.10`) — hard per-intake breach, or
-    `used24 + a > M_d` — would exceed the 24 h max.
-  - **YELLOW** if `a > M_i` but ≤ `M_i × 1.10`, or `recentLoad + a > M_i` (i.e. taking it
-    now effectively means more than one full intake "active"), or
-    `used24 + a > M_d × 0.85` (approaching the daily ceiling).
-  - **GREEN** otherwise.
-- If `minIntervalOverride` is set, RED when `now − lastDose < override × 0.9`,
-  YELLOW when `< override`.
-- **Next-OK time**: smallest `t` where the default preset dose would be GREEN — shown on
-  the card ("Next OK from 14:30") and used for the suggested-next-time hint.
+Scheduled medicines have one `doseAmount`. Optional `startsOn` / `endsOn` (local dates,
+inclusive) give a course length; a finished medicine leaves the checklist and can be
+archived from Settings.
 
-All thresholds live in one pure TypeScript module (`lib/safety.ts`) with unit tests, so
-the model is easy to tune.
+### 2.2 Fixed slots
+- A slot is identified by its UTC instant `slotAt`; `DoseLog.slotAt` records which slot a
+  log answers (server-assigned when the client doesn't pick a row).
+- `minGap` = `minIntervalMin` if set, else half the gap to the next slot. Cutoff =
+  `nextSlotAt − minGap`: 08:00 + 20:00 can be taken until 14:00; once daily until 20:00.
+- States: upcoming → due (from `slotAt − heads-up`) → overdue → **missed** after the
+  cutoff; taken / skipped when a log fills it (uncertain fills it too). Missed slots are
+  derived, never stored, and only from `scheduleReviewedAt` onward.
+- Late doses don't move the schedule. **Push rule:** a dose taken at `t` moves only the
+  next slot to `max(nextSlotAt, t + minGap)`.
+- A tap fills the oldest due/overdue slot, else the next slot (early, next one only). A
+  backdated log fills the slot whose window contains it — unless that would make it an
+  early dose for a slot on a later day (then it answers the previous open slot as a late
+  dose, or no slot). A missed slot is filled only from its row or a backdated time.
+- DST: a nonexistent time moves to the next valid minute; a repeated time gives one slot.
 
-**Disclaimer** shown in Help/first-run: this is a logging aid, not medical advice; always
-follow prescription and doctor's instructions.
+### 2.3 Interval mode
+Next due = last taken + `intervalH`; the first dose is due right away (or at `startsOn`).
+No missed state: an unlogged dose stays overdue and reminders stop after the repeat limit.
+
+### 2.4 Dose check (`checkDose`)
+- Scheduled: warn only when the slot already has a taken/uncertain log, or the previous
+  dose is less than `minGap` ago. No daily-max math.
+- As needed: warn when the amount exceeds `maxPerIntake`, the last dose is less than
+  `minIntervalMin` ago, or the total over the **limit window** plus this dose exceeds
+  `maxPerDay`. Limit window = 24 h − 4 h slack = 20 h (`AS_NEEDED_SLACK_H`), so getting up
+  earlier than yesterday doesn't warn. `countUncertain` (user setting) only affects these.
+- The server repeats the check on `POST /api/doses` with fresh data; if it finds a double
+  dose the client didn't know about, the toast says so (with Undo).
+
+### 2.5 Reminders (web push)
+- For each slot of a reviewed medicine with reminders on (and not finished), to each user
+  with `User.remindersOn`, `PersonAccess.reminders` for that person, and a subscription:
+  heads-up `remindLeadMin` before (default 10), at the time, then every `nagEveryMin`
+  (15) until `nagMaxMin` (120) or the cutoff. Uses the effective (pushed) time.
+- Nothing once the slot has any log by anyone. Same person + same instant ⇒ one
+  notification (tag `personId:slotAt`). Other people / pets are prefixed ("Rex: …"). Text
+  in the receiving user's language.
+- Actions: **Taken** (SW posts the dose; on failure opens the app — nothing is queued),
+  **Snooze 30 min** (per user; one more reminder when it ends). iOS shows no actions.
+- Engine: 60 s tick from `instrumentation.ts`; each send first inserts a `ReminderLog` row
+  (unique key ⇒ idempotent); look back at most 5 min after a restart; prune after 7 days.
+  Subscriptions answering 404/410 are deleted. No quiet hours.
+- Settings hide everything a device can't use; iPhone/iPad outside the home-screen app
+  counts as unsupported and gets install steps.
+
+### 2.6 Required unit tests
+In `lib/schedule.test.ts` / `lib/safety.test.ts`: (1) once daily 08:00 taken at 08:00, no
+warning, day 1 and after; (2) 09:30 yesterday + 08:00 today, no warning; (3) backdated
+yesterday-evening dose doesn't change today or warn; (4) 08/20 taken at 10:00 keeps 20:00;
+(5) morning slot overdue at 13:59, missed at 14:00; (6) missed morning taken at 16:00 pushes
+the next to 22:00, then back on the clock; (7) second tap on a logged slot warns;
+(8) interval 8 h: 09:10 → 17:10, skip advances from `slotAt`; (9) as needed max 3: 08, 14,
+20 then 06:00 ok, a fourth at 23:00 warns; (10) DST both ways in Europe/Oslo; (11) `endsOn`
+yesterday ⇒ no slots today; (12) reminder events: heads-up, due, repeats, none after a
+log, none during a snooze, pushed slot uses the effective time.
+
+**Disclaimer** shown in Help/first-run: this is a reminder and logging aid, not medical
+advice; always follow prescription and doctor's instructions.
 
 ---
 
@@ -117,79 +148,37 @@ Bottom tab bar (mobile-first), max 3 tabs + header:
 
 | Tab | Content |
 |-----|---------|
-| **Home** (log) | Today ribbon, medicine cards with preset buttons, last-taken + next-OK, mini 24 h dots |
-| **History** | Timescale switcher, timeline/calendar/aggregate charts, dose list with edit/delete, export |
-| **Settings** | Medicines CRUD, profile (language, theme, strictness, wake window, uncertain-dose policy), help, about, logout |
+| **Today** | Today's checklist (due now / missed / later / done) and as-needed cards |
+| **History** | Summary line, timeline with missed markers / month calendar / monthly adherence bars, day list with missed doses, export |
+| **Settings** | People & pets, medicines, reminders, preferences (language, theme, uncertain-dose policy), help, logout |
 
 Header: app logo, date, language flag toggle, help `?` button (contextual help sheet per
 screen). Dark/light theme follows system with manual override.
 
 Design language: modern, calm, rounded cards, big touch targets (min 48 px), Tailwind +
-shadcn/ui, subtle motion (logged-dose checkmark animation). Medicine color coding
+shadcn/ui, 24-hour clock everywhere. Medicine color coding
 throughout (card accent, chart series, dots).
 
 ---
 
 ## 4. Data model (Prisma / SQLite)
 
-```prisma
-model User {
-  id        String   @id            // Authentik `sub`
-  email     String   @unique
-  name      String?
-  locale    String   @default("en") // "en" | "nb"
-  theme     String   @default("system")
-  strictness Float   @default(0.15) // slack
-  wakeWindowH Float  @default(17)
-  countUncertain Boolean @default(true)
-  medicines Medicine[]
-  doses     DoseLog[]
-  createdAt DateTime @default(now())
-}
-
-model Medicine {
-  id        String  @id @default(cuid())
-  userId    String
-  user      User    @relation(...)
-  name      String
-  form      String  @default("pill")   // pill|capsule|spray|drops|injection|liquid|other
-  unit      String  @default("mg")
-  color     String  @default("blue")
-  icon      String  @default("pill")
-  presets   Json                        // number[] e.g. [0.5, 1, 2]
-  defaultPreset Float?
-  maxPerIntake  Float?
-  maxPerDay     Float?
-  minIntervalMin Int?                   // optional override, minutes
-  scheduleHints Json?                   // ["08:00","20:00"]
-  notes     String?
-  sortOrder Int     @default(0)
-  archivedAt DateTime?
-  doses     DoseLog[]
-}
-
-model DoseLog {
-  id        String   @id @default(cuid())
-  userId    String
-  medicineId String
-  amount    Float
-  takenAt   DateTime                    // may be backdated
-  status    String   @default("taken")  // taken | uncertain | skipped
-  note      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-```
-
-SQLite file on a Dokploy volume; Prisma migrations. All queries scoped by `userId`.
+See `prisma/schema.prisma` (source of truth). Main tables: `User` (preferences, reminder
+settings), `Person` (+ `timezone`), `PersonAccess` (+ `reminders`), `ShareToken`,
+`Medicine` (mode, doseAmount, times JSON, intervalH, startsOn/endsOn, remindersEnabled,
+scheduleReviewedAt, scheduleChangedAt, presets, limits), `ScheduleVersion` (past
+schedules for history), `DoseLog` (takenAt, `slotAt`, status, note, logged-by user),
+`PushSubscription`, `ReminderLog`. Times stored UTC; JSON stored as strings.
 
 ## 5. API (Next.js route handlers, all under `/api`)
 
-- `GET/POST /api/medicines`, `PATCH/DELETE /api/medicines/:id` (delete = archive)
-- `GET /api/doses?from&to&medicineId` · `POST /api/doses` · `PATCH/DELETE /api/doses/:id`
-- `GET /api/safety/:medicineId?amount=` → {level, reasons, nextOkAt} (same pure lib used client-side; server is source of truth on write)
+- `GET/POST /api/medicines`, `PATCH/DELETE /api/medicines/:id` (delete = archive), `PUT /api/medicines/reorder`
+- `GET /api/doses?from&to&medicineId&personId` · `POST /api/doses` (optional `slotAt`; returns `{dose, check}`) · `PATCH/DELETE /api/doses/:id` (time change re-assigns `slotAt`)
 - `GET/PATCH /api/profile`
-- `GET /api/export?format=csv|json`
+- `GET/POST /api/persons`, `PATCH/DELETE /api/persons/:id`, `PATCH /api/persons/:id/access` (my reminders), `POST /api/persons/:id/share`, `POST /api/persons/join`, `DELETE /api/persons/:id/members/:userId`
+- `POST /api/persons/:id/migrate` (guess schedules) · `POST /api/persons/:id/review` (confirm)
+- `GET /api/push/config` · `POST/DELETE /api/push/subscription` · `POST /api/push/test` · `POST /api/reminders/snooze`
+- `GET /api/export?format=csv|json` (incl. `slot_at`, `mode`, and missed slots as `missed` rows)
 
 ## 6. Auth
 
@@ -208,24 +197,25 @@ SQLite file on a Dokploy volume; Prisma migrations. All queries scoped by `userI
 ## 8. Help
 
 - `?` in the header opens a contextual help sheet for the current screen.
-- Settings → Help: full guide (getting started, safety colors explained with examples,
-  FAQ "I'm not sure I took it", export, install-as-app instructions per platform).
-- First-run onboarding: 3 short cards (add medicine → tap to log → colors explained)
+- Help sheet: getting started, today's list, late doses, the double-dose check, as-needed
+  limits, reminders, "I'm not sure I took it", past doses, install-as-app.
+- First-run onboarding: 3 short cards (add medicines → check off today's list → reminders)
   + medical disclaimer.
 
 ## 9. PWA & deployment
 
 - `manifest.webmanifest`, icons, `standalone` display, theme color; installable on
   iOS/Android/desktop. Simple service worker for shell caching (read-only offline view
-  of cached data; logging requires network in v1 — offline queue is a v2 feature).
+  of cached data; logging requires network — offline queue is a later feature). The service
+  worker also shows reminder notifications (§2.5).
 - **Dockerfile** (Next standalone output) + healthcheck; deployed via Dokploy on the
   Hostinger VPS, domain `pills.valensendstad.no` (Traefik + Let's Encrypt), SQLite on a
   mounted volume, env vars for Authentik OIDC.
 
 ## 10. Nice-to-have backlog (not v1)
 
-Reminders/notifications at suggested times · offline logging queue · multi-profile
-(carer logs for family member) · medication stock/refill countdown · doctor report PDF ·
+Different dose amounts per slot · weekday / every-N-days schedules · quiet hours · offline logging queue · multi-profile
+(carer logs for family member) · medication stock/refill tracking · doctor report PDF ·
 Apple/Google Health export · med interaction warnings · widgets.
 
 ## 11. Implementation steps (each = commit)
@@ -273,4 +263,6 @@ and share tracking between users.
   the browser session (sessionStorage); a fresh start opens the default person.
 - Settings → People: list, create, rename, set default, share (code + copy link), leave,
   delete, add-with-code.
-- Safety settings (strictness, waking hours, count-uncertain) stay per *user* (viewer).
+- Preferences (count-uncertain, reminder settings) stay per *user* (viewer). Reminders are
+  opt-in per person (`PersonAccess.reminders`): on for yourself, off for others; a dose
+  logged by anyone stops reminders for everyone.

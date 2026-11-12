@@ -1,12 +1,19 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+
+const SECTIONS = [
+  "gettingStarted",
+  "checklist",
+  "late",
+  "doubleDose",
+  "asNeeded",
+  "reminders",
+  "unsure",
+  "backdate",
+  "install",
+] as const;
 
 export function HelpSheet({
   open,
@@ -16,34 +23,6 @@ export function HelpSheet({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("help");
-
-  const sections: { title: string; body: React.ReactNode }[] = [
-    { title: t("gettingStartedTitle"), body: t("gettingStartedBody") },
-    {
-      title: t("colorsTitle"),
-      body: (
-        <ul className="space-y-1.5">
-          <li className="flex gap-2">
-            <span className="mt-1.5 size-2.5 shrink-0 rounded-full bg-emerald-500" />
-            {t("colorsGreen")}
-          </li>
-          <li className="flex gap-2">
-            <span className="mt-1.5 size-2.5 shrink-0 rounded-full bg-amber-400" />
-            {t("colorsYellow")}
-          </li>
-          <li className="flex gap-2">
-            <span className="mt-1.5 size-2.5 shrink-0 rounded-full bg-red-500" />
-            {t("colorsRed")}
-          </li>
-        </ul>
-      ),
-    },
-    { title: t("spacingTitle"), body: t("spacingBody") },
-    { title: t("unsureTitle"), body: t("unsureBody") },
-    { title: t("backdateTitle"), body: t("backdateBody") },
-    { title: t("installTitle"), body: t("installBody") },
-  ];
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl">
@@ -51,10 +30,10 @@ export function HelpSheet({
           <SheetTitle>{t("title")}</SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-4 pb-8 text-sm text-muted-foreground">
-          {sections.map((s) => (
-            <section key={s.title}>
-              <h3 className="mb-1 font-medium text-foreground">{s.title}</h3>
-              {s.body}
+          {SECTIONS.map((s) => (
+            <section key={s}>
+              <h3 className="mb-1 font-medium text-foreground">{t(`${s}Title`)}</h3>
+              <p className="whitespace-pre-line">{t(`${s}Body`)}</p>
             </section>
           ))}
           <section className="rounded-lg border border-amber-300/50 bg-amber-500/10 p-3">

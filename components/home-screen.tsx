@@ -4,283 +4,448 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { BellRing, CircleCheckBig, ClipboardCheck, Plus } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { MedicineCard } from "@/components/medicine-card";
-import { LogSheet, type LogRequest } from "@/components/log-sheet";
-import { WarningDialog } from "@/components/warning-dialog";
+import { AsNeededCard } from "@/components/as-needed-card";
+import { DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
+import { EditDoseDialog } from "@/components/edit-dose-dialog";
+import { LogSheet } from "@/components/log-sheet";
+import { MedicineDialog } from "@/components/medicine-dialog";
 import { Onboarding } from "@/components/onboarding";
-import { api } from "@/lib/client";
+import { ReviewScreen } from "@/components/review-screen";
 import { usePersons } from "@/components/person-context";
+import { useDoseLogger } from "@/components/use-dose-logger";
+import { api } from "@/lib/client";
+import { buildChecklist } from "@/lib/checklist";
+import { closeStaleNotifications, usePushSupport, useDevicePush } from "@/lib/push-client";
+import { DAY, isFinished, type LogEntry } from "@/lib/schedule";
 import {
-  parsePresets,
+  currentScheduleFrom,
+  doseAmountOf,
+  scheduleOf,
+  toLogEntries,
   type DoseDTO,
-  type LogResponse,
   type MedicineDTO,
   type ProfileDTO,
 } from "@/lib/types";
-import {
-  evaluateDose,
-  type DoseStatus,
-  type SafetyConfig,
-  type SafetyResult,
-} from "@/lib/safety";
-import { formatAmount } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
-interface PendingLog {
-  medicine: MedicineDTO;
-  req: LogRequest;
-  safety: SafetyResult;
+interface HomeData {
+  personId: string;
+  profile: ProfileDTO;
+  medicines: MedicineDTO[];
+  doses: DoseDTO[];
 }
+
+async function loadHome(personId: string, onMigrated: () => void): Promise<HomeData> {
+  const pid = encodeURIComponent(personId);
+  const medsUrl = `/api/medicines?personId=${pid}&archived=true`;
+  const [profile, first] = await Promise.all([api<ProfileDTO>("/api/profile"), api<MedicineDTO[]>(medsUrl)]);
+  let medicines = first;
+  if (medicines.some((m) => m.mode === null)) {
+    // Medicines from before schedules: guess once (idempotent), then review.
+    await api(`/api/persons/${pid}/migrate`, {
+      method: "POST",
+      body: JSON.stringify({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+    });
+    medicines = await api<MedicineDTO[]>(medsUrl);
+    onMigrated();
+  }
+  const from = new Date(Date.now() - 3 * DAY).toISOString();
+  const doses = await api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`);
+  return { personId, profile, medicines, doses };
+}
+
+const REVIEW_KEY = "pills.reviewClosed";
+const PROMPT_KEY = "pills.reminderPromptDismissed";
+
+function readFlag(storage: "session" | "local", key: string) {
+  try {
+    return (storage === "session" ? sessionStorage : localStorage).getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(storage: "session" | "local", key: string) {
+  try {
+    (storage === "session" ? sessionStorage : localStorage).setItem(key, "1");
+  } catch {
+    // private mode etc.
+  }
+}
+
+type SheetTarget = { medicine: MedicineDTO; slotAt?: number; initialAt?: number };
 
 export function HomeScreen() {
   const t = useTranslations();
-  const { current, meId } = usePersons();
+  const { current, meId, reload: reloadPersons } = usePersons();
   const personId = current?.id;
-  const [profile, setProfile] = useState<ProfileDTO | null>(null);
-  const [medicines, setMedicines] = useState<MedicineDTO[] | null>(null);
-  const [doses, setDoses] = useState<DoseDTO[]>([]);
-  const [sheetMedicine, setSheetMedicine] = useState<MedicineDTO | null>(null);
-  const [pending, setPending] = useState<PendingLog | null>(null);
+  const timeZone = current?.timezone ?? "Europe/Oslo";
+  const now = useNow();
+  const support = usePushSupport();
+  const device = useDevicePush(support);
 
-  const reload = useCallback(async () => {
-    if (!personId) return;
-    const from = new Date(Date.now() - 7 * 24 * 3_600_000).toISOString();
-    const pid = encodeURIComponent(personId);
-    const [p, m, d] = await Promise.all([
-      api<ProfileDTO>("/api/profile"),
-      api<MedicineDTO[]>(`/api/medicines?personId=${pid}`),
-      api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`),
-    ]);
-    setProfile(p);
-    setMedicines(m);
-    setDoses(d);
-  }, [personId]);
+  const [data, setData] = useState<HomeData | null>(null);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const [sheet, setSheet] = useState<SheetTarget | null>(null);
+  const [editing, setEditing] = useState<DoseDTO | null>(null);
+  const [changing, setChanging] = useState<MedicineDTO | null>(null);
+  const [reviewClosed, setReviewClosed] = useState(() => typeof window !== "undefined" && readFlag("session", REVIEW_KEY));
+  const [promptDismissed, setPromptDismissed] = useState(
+    () => typeof window !== "undefined" && readFlag("local", PROMPT_KEY),
+  );
 
   useEffect(() => {
-    reload().catch(() => toast.error(t("common.error")));
-  }, [reload, t]);
+    if (!personId) return;
+    let alive = true;
+    loadHome(personId, () => void reloadPersons())
+      .then((d) => alive && setData(d))
+      .catch(() => toast.error(t("common.error")));
+    return () => {
+      alive = false;
+    };
+  }, [personId, version, reloadPersons, t]);
 
-  const dosesByMedicine = useMemo(() => {
-    const map = new Map<string, DoseDTO[]>();
-    for (const d of doses) {
-      const list = map.get(d.medicineId) ?? [];
-      list.push(d);
-      map.set(d.medicineId, list);
+  // "Taken" from a notification: the service worker tells open windows to refresh.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "doses-changed") reload();
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [reload]);
+
+  const ready = data && data.personId === personId ? data : null;
+  const medicines = useMemo(() => ready?.medicines ?? [], [ready]);
+  const doses = useMemo(() => ready?.doses ?? [], [ready]);
+  const medById = useMemo(() => new Map(medicines.map((m) => [m.id, m])), [medicines]);
+
+  const logsByMed = useMemo(() => {
+    const map = new Map<string, LogEntry[]>();
+    for (const m of medicines) {
+      map.set(m.id, toLogEntries(doses.filter((d) => d.medicineId === m.id), m));
     }
     return map;
-  }, [doses]);
+  }, [medicines, doses]);
+  const logsFor = useCallback((id: string) => logsByMed.get(id) ?? [], [logsByMed]);
 
-  const configFor = useCallback(
-    (m: MedicineDTO): SafetyConfig => ({
-      maxPerIntake: m.maxPerIntake,
-      maxPerDay: m.maxPerDay,
-      minIntervalMin: m.minIntervalMin,
-      slack: profile?.strictness,
-      wakeWindowH: profile?.wakeWindowH,
-      countUncertain: profile?.countUncertain,
-    }),
-    [profile],
+  // When the app opens (and after each reload), close notifications for slots already logged.
+  useEffect(() => {
+    if (!ready) return;
+    void closeStaleNotifications((medicineId, slotAt) =>
+      (logsByMed.get(medicineId) ?? []).some((l) => l.slotAt === slotAt),
+    ).catch(() => {});
+  }, [ready, logsByMed]);
+
+  const { requestLog, dialog } = useDoseLogger({
+    profile: ready?.profile ?? null,
+    timeZone,
+    logsFor,
+    onLogged: (dose) => setData((d) => (d ? { ...d, doses: [dose, ...d.doses] } : d)),
+    onUndone: (id) => setData((d) => (d ? { ...d, doses: d.doses.filter((x) => x.id !== id) } : d)),
+  });
+
+  const active = useMemo(
+    () => medicines.filter((m) => !m.archivedAt && !m.hidden && !isFinished(scheduleOf(m, timeZone), now)),
+    [medicines, timeZone, now],
   );
 
-  const persist = useCallback(
-    async (medicine: MedicineDTO, req: LogRequest) => {
-      try {
-        const res = await api<LogResponse>("/api/doses", {
-          method: "POST",
-          body: JSON.stringify({
-            medicineId: medicine.id,
-            amount: req.amount,
-            takenAt: req.takenAt.toISOString(),
-            status: req.status,
-            note: req.note,
-          }),
-        });
-        setDoses((ds) =>
-          [res.dose, ...ds].sort(
-            (a, b) => new Date(b.takenAt).getTime() - new Date(a.takenAt).getTime(),
-          ),
-        );
-        toast.success(
-          t("home.logged", {
-            amount: formatAmount(req.amount),
-            unit: medicine.unit,
-            name: medicine.name,
-          }),
-          {
-            duration: 8000,
-            action: {
-              label: t("home.undo"),
-              onClick: async () => {
-                await api(`/api/doses/${res.dose.id}`, { method: "DELETE" });
-                setDoses((ds) => ds.filter((d) => d.id !== res.dose.id));
-                toast.info(t("home.undone"));
-              },
-            },
-          },
-        );
-      } catch {
-        toast.error(t("common.error"));
-      }
-    },
-    [t],
+  const checklist = useMemo(
+    () =>
+      buildChecklist(
+        active.map((m) => ({
+          id: m.id,
+          schedule: scheduleOf(m, timeZone),
+          logs: logsFor(m.id),
+          anchor: Date.parse(m.scheduleReviewedAt ?? m.createdAt),
+          slotsFrom: m.scheduleChangedAt ? currentScheduleFrom(m) : null,
+          missedFrom: currentScheduleFrom(m),
+        })),
+        now,
+        ready?.profile.remindLeadMin ?? 10,
+      ),
+    [active, timeZone, logsFor, now, ready],
   );
 
-  const requestLog = useCallback(
-    (medicine: MedicineDTO, req: LogRequest) => {
-      const entries = (dosesByMedicine.get(medicine.id) ?? []).map((d) => ({
-        amount: d.amount,
-        takenAt: new Date(d.takenAt),
-        status: d.status as DoseStatus,
-      }));
-      // Skipped doses don't need a safety check.
-      const safety =
-        req.status === "skipped"
-          ? null
-          : evaluateDose(configFor(medicine), entries, req.amount, req.takenAt);
-      if (safety && safety.level !== "green") {
-        setPending({ medicine, req, safety });
-      } else {
-        void persist(medicine, req);
-      }
-    },
-    [dosesByMedicine, configFor, persist],
-  );
-
-  if (!medicines || !profile || !current || medicines.some((m) => m.personId !== current.id)) {
+  if (!ready || !current) {
     return <p className="py-12 text-center text-muted-foreground">{t("common.loading")}</p>;
   }
+  const profile = ready.profile;
 
   if (!profile.onboarded) {
     return (
       <Onboarding
         onDone={async () => {
-          await api("/api/profile", {
-            method: "PATCH",
-            body: JSON.stringify({ onboarded: true }),
-          });
-          setProfile({ ...profile, onboarded: true });
+          await api("/api/profile", { method: "PATCH", body: JSON.stringify({ onboarded: true }) });
+          setData((d) => (d ? { ...d, profile: { ...d.profile, onboarded: true } } : d));
         }}
       />
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <TodayRibbon medicines={medicines} doses={doses} />
+  const unreviewed = medicines.filter((m) => !m.archivedAt && m.mode && !m.scheduleReviewedAt);
+  const confirm = async (ids?: string[]) => {
+    try {
+      await api(`/api/persons/${encodeURIComponent(current.id)}/review`, {
+        method: "POST",
+        body: JSON.stringify(ids ? { medicineIds: ids } : {}),
+      });
+      reload();
+    } catch {
+      toast.error(t("common.error"));
+    }
+  };
+  const medicineDialog = changing && (
+    <MedicineDialog
+      medicine={changing}
+      timeZone={timeZone}
+      showReminderSwitch={support === "supported" && profile.remindersOn}
+      onClose={() => setChanging(null)}
+      onChanged={() => {
+        setChanging(null);
+        reload();
+      }}
+    />
+  );
 
-      {medicines.length === 0 && (
+  if (unreviewed.length && !reviewClosed) {
+    return (
+      <>
+        <ReviewScreen
+          medicines={unreviewed}
+          personName={current.isSelf ? null : current.name}
+          onConfirm={(m) => confirm([m.id])}
+          onConfirmAll={() => confirm()}
+          onChange={setChanging}
+          onClose={() => {
+            writeFlag("session", REVIEW_KEY);
+            setReviewClosed(true);
+          }}
+        />
+        {medicineDialog}
+      </>
+    );
+  }
+
+  const loggedByOther = (doseId: string | undefined) => {
+    const d = doses.find((x) => x.id === doseId);
+    return d?.loggedBy && meId && d.loggedBy.id !== meId ? (d.loggedBy.name ?? d.loggedBy.email) : null;
+  };
+  const take = (m: MedicineDTO, slotAt: number) =>
+    requestLog(m, { amount: doseAmountOf(m), status: "taken", slotAt });
+  const skip = (m: MedicineDTO, slotAt: number) =>
+    requestLog(m, { amount: doseAmountOf(m), status: "skipped", slotAt });
+
+  const asNeeded = active.filter((m) => scheduleOf(m, timeZone).mode === "asNeeded");
+  const showPrompt =
+    support === "supported" &&
+    profile.remindersOn &&
+    device.state === "off" &&
+    !promptDismissed &&
+    !unreviewed.length &&
+    checklist.hasScheduled;
+  const nothingLeft = checklist.hasScheduled && !checklist.due.length && !checklist.missed.length && !checklist.later.length;
+
+  return (
+    <div className="space-y-5">
+      {unreviewed.length > 0 && (
+        <Card className="flex-row items-center gap-3 border-amber-300/60 bg-amber-500/10 p-3">
+          <ClipboardCheck className="size-5 shrink-0 text-amber-700 dark:text-amber-400" />
+          <p className="flex-1 text-sm">{t("review.banner", { count: unreviewed.length })}</p>
+          <Button size="sm" variant="outline" onClick={() => setReviewClosed(false)}>
+            {t("review.open")}
+          </Button>
+        </Card>
+      )}
+
+      {showPrompt && (
+        <Card className="gap-2 p-4">
+          <p className="flex items-center gap-2 font-medium">
+            <BellRing className="size-4 text-teal-600" /> {t("reminders.promptTitle")}
+          </p>
+          <p className="text-sm text-muted-foreground">{t("reminders.promptBody")}</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() =>
+                device.enable().catch((e) =>
+                  toast.error(e instanceof Error && e.message === "push_not_configured" ? t("reminders.notConfigured") : t("common.error")),
+                )
+              }
+            >
+              {t("reminders.enableHere")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                writeFlag("local", PROMPT_KEY);
+                setPromptDismissed(true);
+              }}
+            >
+              {t("reminders.notNow")}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {medicines.filter((m) => !m.archivedAt).length === 0 && (
         <Card className="items-center gap-2 p-8 text-center">
           <h2 className="font-semibold">{t("home.noMedicines")}</h2>
           <p className="text-sm text-muted-foreground">{t("home.noMedicinesHint")}</p>
-          <Link
-            href="/settings"
-            className={cn(buttonVariants(), "mt-2")}
-          >
+          <Link href="/settings#medicines" className={cn(buttonVariants(), "mt-2")}>
             <Plus className="size-4" /> {t("home.addMedicine")}
           </Link>
         </Card>
       )}
 
-      {medicines.filter((m) => !m.hidden).map((m) => (
-        <MedicineCard
-          key={m.id}
-          medicine={m}
-          doses={dosesByMedicine.get(m.id) ?? []}
-          safetyConfig={configFor(m)}
-          meId={meId}
-          onQuickLog={(amount) =>
-            requestLog(m, { amount, takenAt: new Date(), status: "taken" })
-          }
-          onMore={() => setSheetMedicine(m)}
-        />
-      ))}
+      {checklist.due.length > 0 && (
+        <Section title={t("home.dueNow")}>
+          {checklist.due.map(({ medicineId, slot }) => {
+            const m = medById.get(medicineId)!;
+            return (
+              <DueRow
+                key={`${medicineId}:${slot.slotAt}`}
+                medicine={m}
+                slot={slot}
+                timeZone={timeZone}
+                now={now}
+                onTake={() => take(m, slot.slotAt)}
+                onMore={() => setSheet({ medicine: m, slotAt: slot.slotAt })}
+              />
+            );
+          })}
+        </Section>
+      )}
 
-      <LogSheet
-        medicine={sheetMedicine}
-        open={sheetMedicine !== null}
-        onOpenChange={(o) => !o && setSheetMedicine(null)}
-        onSubmit={(req) => {
-          const m = sheetMedicine;
-          setSheetMedicine(null);
-          if (m) requestLog(m, req);
-        }}
-      />
+      {checklist.missed.length > 0 && (
+        <Section title={t("home.missed")} tone="alert">
+          {checklist.missed.map(({ medicineId, slot }) => {
+            const m = medById.get(medicineId)!;
+            return (
+              <MissedRow
+                key={`${medicineId}:${slot.slotAt}`}
+                medicine={m}
+                slot={slot}
+                timeZone={timeZone}
+                onTakeLate={() => take(m, slot.slotAt)}
+                onSkip={() => skip(m, slot.slotAt)}
+                onMore={() => setSheet({ medicine: m, slotAt: slot.slotAt })}
+              />
+            );
+          })}
+        </Section>
+      )}
 
-      <WarningDialog
-        safety={pending?.safety ?? null}
-        open={pending !== null}
-        onConfirm={() => {
-          if (pending) void persist(pending.medicine, pending.req);
-          setPending(null);
-        }}
-        onCancel={() => setPending(null)}
-      />
-    </div>
-  );
-}
+      {checklist.later.length > 0 && (
+        <Section title={t("home.laterToday")}>
+          {checklist.later.map(({ medicineId, slot }) => {
+            const m = medById.get(medicineId)!;
+            return (
+              <LaterRow
+                key={`${medicineId}:${slot.slotAt}`}
+                medicine={m}
+                slot={slot}
+                timeZone={timeZone}
+                onTakeNow={() => take(m, slot.slotAt)}
+                onSkip={() => skip(m, slot.slotAt)}
+                onMore={() => setSheet({ medicine: m, slotAt: slot.slotAt })}
+              />
+            );
+          })}
+        </Section>
+      )}
 
-function TodayRibbon({
-  medicines,
-  doses,
-}: {
-  medicines: MedicineDTO[];
-  doses: DoseDTO[];
-}) {
-  const t = useTranslations();
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
-  const rows = medicines
-    .map((m) => {
-      const total = doses
-        .filter(
-          (d) =>
-            d.medicineId === m.id &&
-            d.status !== "skipped" &&
-            new Date(d.takenAt) >= startOfDay,
-        )
-        .reduce((s, d) => s + d.amount, 0);
-      return { m, total };
-    })
-    // Hidden medicines keep their ribbon row only if something was logged today.
-    .filter((r) => r.total > 0 || (!r.m.hidden && r.m.maxPerDay));
-
-  if (!rows.length) return null;
-
-  return (
-    <Card className="gap-2.5 p-4">
-      <h2 className="text-sm font-medium text-muted-foreground">{t("home.today")}</h2>
-      {rows.map(({ m, total }) => {
-        const frac = m.maxPerDay ? Math.min(1, total / m.maxPerDay) : 0;
-        return (
-          <div key={m.id}>
-            <div className="mb-1 flex justify-between text-sm">
-              <span>{m.name}</span>
-              <span className="font-medium">
-                {formatAmount(total)}
-                {m.maxPerDay
-                  ? ` ${t("home.of")} ${formatAmount(m.maxPerDay)}`
-                  : ""}{" "}
-                {m.unit}
-              </span>
-            </div>
-            {m.maxPerDay && (
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    frac >= 1 ? "bg-red-500" : frac >= 0.85 ? "bg-amber-400" : "bg-teal-500",
-                  )}
-                  style={{ width: `${frac * 100}%` }}
-                />
-              </div>
-            )}
+      {nothingLeft && (
+        <Card className="flex-row items-center gap-3 border-teal-600/30 bg-teal-600/10 p-4">
+          <CircleCheckBig className="size-6 shrink-0 text-teal-600 dark:text-teal-400" />
+          <div>
+            <p className="font-semibold">{t("home.allDone")}</p>
+            <p className="text-sm text-muted-foreground">{t("home.allDoneHint")}</p>
           </div>
-        );
-      })}
-    </Card>
+        </Card>
+      )}
+
+      {checklist.done.length > 0 && (
+        <Section title={t("home.done")}>
+          {checklist.done.map(({ medicineId, log }) => {
+            const m = medById.get(medicineId)!;
+            const dose = doses.find((d) => d.id === log.id);
+            return (
+              <DoneRow
+                key={log.id}
+                medicine={m}
+                log={log}
+                timeZone={timeZone}
+                loggedBy={loggedByOther(log.id)}
+                onEdit={() => dose && setEditing(dose)}
+                onMore={() => setSheet({ medicine: m, slotAt: log.slotAt ?? undefined })}
+              />
+            );
+          })}
+        </Section>
+      )}
+
+      {asNeeded.length > 0 && (
+        <section className="space-y-1.5">
+          <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("home.asNeeded")}
+          </h2>
+          <div className="space-y-2">
+            {asNeeded.map((m) => {
+              const logs = logsFor(m.id);
+              const last = [...logs].filter((l) => l.status !== "skipped").sort((a, b) => b.takenAt - a.takenAt)[0];
+              return (
+                <AsNeededCard
+                  key={m.id}
+                  medicine={m}
+                  logs={logs}
+                  now={now}
+                  timeZone={timeZone}
+                  countUncertain={profile.countUncertain}
+                  lastBy={loggedByOther(last?.id)}
+                  onQuickLog={(amount) => requestLog(m, { amount, status: "taken" })}
+                  onMore={() => setSheet({ medicine: m })}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {sheet && (
+        <LogSheet
+          medicine={sheet.medicine}
+          timeZone={timeZone}
+          slotAt={sheet.slotAt}
+          initialAt={sheet.initialAt}
+          onClose={() => setSheet(null)}
+          onSubmit={(req) => {
+            const m = sheet.medicine;
+            setSheet(null);
+            requestLog(m, req);
+          }}
+        />
+      )}
+      {editing && (
+        <EditDoseDialog
+          dose={editing}
+          medicine={medById.get(editing.medicineId) ?? null}
+          timeZone={timeZone}
+          onClose={() => setEditing(null)}
+          onChanged={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {medicineDialog}
+      {dialog}
+    </div>
   );
 }

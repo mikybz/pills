@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { AlertTriangle, OctagonAlert } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,74 +11,87 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SafetyResult } from "@/lib/safety";
-import { formatTime } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import type { CheckResult, Reason } from "@/lib/safety";
+import { formatAmount, formatDateTime, formatDose, formatDuration, formatTime } from "@/lib/format";
+import { localDate } from "@/lib/tz";
+import type { MedicineDTO } from "@/lib/types";
+import { useNow } from "@/lib/use-now";
 
+/**
+ * The one confirm sheet before a likely double dose or an as-needed limit. It
+ * states the facts and offers "Log anyway" / "Cancel". Logging is never blocked.
+ */
 export function WarningDialog({
-  safety,
-  open,
+  check,
+  medicine,
+  timeZone,
   onConfirm,
   onCancel,
 }: {
-  safety: SafetyResult | null;
-  open: boolean;
+  check: CheckResult;
+  medicine: MedicineDTO;
+  timeZone: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  if (!safety) return null;
-  const red = safety.level === "red";
+  const now = useNow();
+
+  const when = (at: number) =>
+    localDate(at, timeZone) === localDate(now, timeZone)
+      ? formatTime(at, locale, timeZone)
+      : formatDateTime(at, locale, timeZone);
+
+  const ago = (at: number) =>
+    now - at < 60_000 ? t("warning.justNow") : t("warning.ago", { duration: formatDuration(now - at, t) });
+
+  function line(r: Reason) {
+    switch (r.code) {
+      case "slotLogged":
+        return t("warning.slotLogged", { time: when(r.takenAt), ago: ago(r.takenAt) });
+      case "tooSoon":
+        return t("warning.tooSoon", {
+          time: when(r.takenAt),
+          ago: ago(r.takenAt),
+          gap: formatDuration(r.minGapMin * 60_000, t),
+        });
+      case "overIntake":
+        return t("warning.overIntake", {
+          amount: formatDose(r.amount, medicine.unit, t),
+          max: formatDose(r.max, medicine.unit, t),
+        });
+      case "overDaily":
+        return t("warning.overDaily", {
+          total: formatDose(r.used + r.amount, medicine.unit, t),
+          hours: formatAmount(r.windowH),
+          max: formatDose(r.max, medicine.unit, t),
+        });
+    }
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="max-w-sm rounded-2xl">
         <DialogHeader>
-          <DialogTitle
-            className={cn(
-              "flex items-center gap-2",
-              red ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400",
-            )}
-          >
-            {red ? <OctagonAlert className="size-5" /> : <AlertTriangle className="size-5" />}
-            {red ? t("warning.redTitle") : t("warning.yellowTitle")}
+          <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="size-5" />
+            {t("warning.title", { name: medicine.name })}
           </DialogTitle>
           <DialogDescription render={<div />}>
-            <div className="space-y-2 pt-1 text-left">
-              {safety.reasons.map((r, i) => (
-                <p key={i}>
-                  {t(
-                    r.key,
-                    Object.fromEntries(
-                      Object.entries(r.params ?? {}).map(([k, v]) => [
-                        k,
-                        typeof v === "number" ? Math.round(v * 100) / 100 : v,
-                      ]),
-                    ),
-                  )}
-                </p>
+            <div className="space-y-2 pt-1 text-left text-foreground">
+              {check.reasons.map((r, i) => (
+                <p key={i}>{line(r)}</p>
               ))}
-              {safety.nextOkAt && (
-                <p className="font-medium text-foreground">
-                  {t("warning.nextOk", {
-                    time: formatTime(new Date(safety.nextOkAt), locale),
-                  })}
-                </p>
-              )}
             </div>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="flex-col gap-2 sm:flex-col">
-          <Button
-            variant={red ? "destructive" : "default"}
-            className="w-full"
-            onClick={onConfirm}
-          >
-            {t("warning.takeAnyway")}
+          <Button className="w-full" onClick={onConfirm}>
+            {t("warning.logAnyway")}
           </Button>
           <Button variant="outline" className="w-full" onClick={onCancel}>
-            {t("warning.wait")}
+            {t("common.cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>

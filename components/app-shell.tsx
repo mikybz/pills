@@ -6,7 +6,8 @@ import { useTranslations } from "next-intl";
 import { Check, ChevronDown, CircleHelp, ClipboardList, History, Pill, Settings, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HelpSheet } from "@/components/help-sheet";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { syncPushSubscription } from "@/lib/push-client";
 import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
@@ -77,6 +78,11 @@ function Shell({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const pathname = usePathname();
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // Keep this device's push subscription registered for the signed-in user.
+  useEffect(() => {
+    syncPushSubscription().catch(() => {});
+  }, []);
 
   const tabs = [
     { href: "/", label: t("nav.home"), icon: ClipboardList },

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
-import { findAccessibleMedicine, resolvePersonId } from "@/lib/persons";
-import { evaluateDose, type DoseEntry, type DoseStatus } from "@/lib/safety";
+import { findAccessibleMedicineWithPerson, resolvePersonId } from "@/lib/persons";
+import { checkFor, logsAround, resolveSlot } from "@/lib/doses-server";
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -13,14 +13,16 @@ export async function GET(req: NextRequest) {
     const medicineId = sp.get("medicineId") ?? undefined;
     const personId = await resolvePersonId(user, sp.get("personId"));
     if (!personId) return notFound();
+    const range = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     const doses = await prisma.doseLog.findMany({
       where: {
         medicine: { personId },
         ...(medicineId ? { medicineId } : {}),
-        takenAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) },
+        // A log belongs to the range by its taken time or by the slot it answers.
+        OR: [{ takenAt: range }, { slotAt: range }],
       },
       orderBy: { takenAt: "desc" },
-      take: 2000,
+      take: 20000,
       include: { user: { select: { id: true, name: true, email: true } } },
     });
     return NextResponse.json(
@@ -33,40 +35,29 @@ export async function POST(req: NextRequest) {
   return withUser(async (user) => {
     const parsed = doseSchema.safeParse(await req.json());
     if (!parsed.success) return badRequest(parsed.error.message);
-    const { medicineId, amount, takenAt, status, note } = parsed.data;
+    const { medicineId, amount, takenAt, slotAt: requested, status, note } = parsed.data;
 
-    const medicine = await findAccessibleMedicine(user.id, medicineId);
+    const medicine = await findAccessibleMedicineWithPerson(user.id, medicineId);
     if (!medicine) return notFound();
 
     const when = takenAt ?? new Date();
-    const recent = await prisma.doseLog.findMany({
-      where: {
-        medicineId,
-        takenAt: { gte: new Date(when.getTime() - 48 * 3_600_000), lt: when },
-      },
-    });
-    const safety = evaluateDose(
-      {
-        maxPerIntake: medicine.maxPerIntake,
-        maxPerDay: medicine.maxPerDay,
-        minIntervalMin: medicine.minIntervalMin,
-        slack: user.strictness,
-        wakeWindowH: user.wakeWindowH,
-        countUncertain: user.countUncertain,
-      },
-      recent.map((d): DoseEntry => ({
-        amount: d.amount,
-        takenAt: d.takenAt,
-        status: d.status as DoseStatus,
-      })),
-      amount,
-      when,
-    );
+    const logs = await logsAround(medicine, when.getTime());
+    const slotAt = resolveSlot({ medicine, user, logs, at: when.getTime(), requested });
+    // Server is the source of truth: the check runs again here with the assigned slot.
+    const check = checkFor(medicine, user, logs, { amount, at: when.getTime(), status, slotAt });
 
     const dose = await prisma.doseLog.create({
-      data: { userId: user.id, medicineId, amount, takenAt: when, status, note },
+      data: {
+        userId: user.id,
+        medicineId,
+        amount,
+        takenAt: when,
+        slotAt: slotAt === null ? null : new Date(slotAt),
+        status,
+        note,
+      },
     });
     const loggedBy = { id: user.id, name: user.name, email: user.email };
-    return NextResponse.json({ dose: { ...dose, loggedBy }, safety }, { status: 201 });
+    return NextResponse.json({ dose: { ...dose, loggedBy }, check }, { status: 201 });
   });
 }

@@ -5,7 +5,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -21,21 +20,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
-import { api } from "@/lib/client";
-import { colorClasses, type DoseDTO, type MedicineDTO } from "@/lib/types";
+import { LogSheet } from "@/components/log-sheet";
 import { usePersons } from "@/components/person-context";
-import { formatAmount, formatDay, formatTime } from "@/lib/format";
+import { useDoseLogger } from "@/components/use-dose-logger";
+import { api } from "@/lib/client";
+import { formatAmount, formatDay, formatDose, formatDuration, formatMonth, formatTime } from "@/lib/format";
+import { DAY, historySlots, isScheduled, MIN, type HistorySlot, type LogEntry } from "@/lib/schedule";
+import { addDays, localDate, startOfLocalDay, weekdayMon0 } from "@/lib/tz";
+import {
+  colorClasses,
+  doseAmountOf,
+  segmentsOf,
+  toLogEntries,
+  type DoseDTO,
+  type MedicineDTO,
+  type ProfileDTO,
+} from "@/lib/types";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
 type Range = "3d" | "week" | "month" | "year" | "all";
-
-const RANGE_DAYS: Record<Range, number | null> = {
-  "3d": 3,
-  week: 7,
-  month: 30,
-  year: 365,
-  all: null,
-};
+const RANGE_DAYS: Record<Range, number | null> = { "3d": 3, week: 7, month: 30, year: 365, all: null };
+const LATE_SHOWN_MS = 30 * MIN;
 
 interface TooltipState {
   x: number;
@@ -43,77 +49,165 @@ interface TooltipState {
   lines: string[];
 }
 
+interface Data {
+  key: string;
+  profile: ProfileDTO;
+  medicines: MedicineDTO[];
+  doses: DoseDTO[];
+}
+
+/** A missed slot (derived) with its medicine. */
+interface MissedItem {
+  medicineId: string;
+  slot: HistorySlot;
+}
+
 export function HistoryScreen() {
   const t = useTranslations();
   const locale = useLocale();
-  const personId = usePersons().current?.id;
-  const [range, setRange] = useState<Range>("3d");
+  const { current, meId } = usePersons();
+  const personId = current?.id;
+  const tz = current?.timezone ?? "Europe/Oslo";
+  const now = useNow();
+  const [range, setRange] = useState<Range>("week");
   const [medicineFilter, setMedicineFilter] = useState<string>("all");
   const [prevPersonId, setPrevPersonId] = useState(personId);
   if (prevPersonId !== personId) {
     setPrevPersonId(personId);
     setMedicineFilter("all");
   }
-  const [medicines, setMedicines] = useState<MedicineDTO[]>([]);
-  const [doses, setDoses] = useState<DoseDTO[] | null>(null);
+  const [data, setData] = useState<Data | null>(null);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
   const [editing, setEditing] = useState<DoseDTO | null>(null);
+  const [sheet, setSheet] = useState<{ medicine: MedicineDTO; slotAt: number } | null>(null);
 
-  const reload = useCallback(async () => {
-    const days = RANGE_DAYS[range];
-    const from = days
-      ? new Date(Date.now() - days * 24 * 3_600_000).toISOString()
-      : new Date(0).toISOString();
-    if (!personId) return;
-    const pid = encodeURIComponent(personId);
-    const [m, d] = await Promise.all([
-      api<MedicineDTO[]>(`/api/medicines?personId=${pid}&archived=true`),
-      api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`),
-    ]);
-    setMedicines(m);
-    setDoses(d);
-  }, [range, personId]);
-
+  const key = `${personId}|${range}`;
   useEffect(() => {
-    reload().catch(() => toast.error(t("common.error")));
-  }, [reload, t]);
+    if (!personId) return;
+    let alive = true;
+    const days = RANGE_DAYS[range];
+    // One extra day back: the push rule and slot windows look at the previous dose.
+    const from = days ? new Date(Date.now() - (days + 1) * DAY).toISOString() : new Date(0).toISOString();
+    const pid = encodeURIComponent(personId);
+    Promise.all([
+      api<ProfileDTO>("/api/profile"),
+      api<MedicineDTO[]>(`/api/medicines?personId=${pid}&archived=true&versions=true`),
+      api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`),
+    ])
+      .then(([profile, medicines, doses]) => alive && setData({ key: `${personId}|${range}`, profile, medicines, doses }))
+      .catch(() => toast.error(t("common.error")));
+    return () => {
+      alive = false;
+    };
+  }, [personId, range, version, t]);
 
-  const visible = useMemo(
+  const ready = data && data.key === key ? data : null;
+  const medicines = useMemo(() => ready?.medicines ?? [], [ready]);
+  const medById = useMemo(() => new Map(medicines.map((m) => [m.id, m])), [medicines]);
+  const logsByMed = useMemo(() => {
+    const map = new Map<string, LogEntry[]>();
+    for (const m of medicines) map.set(m.id, toLogEntries((ready?.doses ?? []).filter((d) => d.medicineId === m.id), m));
+    return map;
+  }, [medicines, ready]);
+  const logsFor = useCallback((id: string) => logsByMed.get(id) ?? [], [logsByMed]);
+
+  const today = localDate(now, tz);
+  const days = RANGE_DAYS[range];
+  const rangeStart = useMemo(() => {
+    if (days) return startOfLocalDay(addDays(today, -(days - 1)), tz);
+    const firsts = [
+      ...(ready?.doses ?? []).map((d) => Date.parse(d.takenAt)),
+      ...medicines.map((m) => (m.scheduleReviewedAt ? Date.parse(m.scheduleReviewedAt) : Infinity)),
+    ];
+    const first = Math.min(...firsts, now);
+    return startOfLocalDay(localDate(first, tz), tz);
+  }, [days, today, tz, ready, medicines, now]);
+
+  const filtered = useMemo(
+    () => medicines.filter((m) => medicineFilter === "all" || m.id === medicineFilter),
+    [medicines, medicineFilter],
+  );
+
+  // Derived slots per medicine (same pure function as the home screen).
+  const slotsByMed = useMemo(() => {
+    const map = new Map<string, HistorySlot[]>();
+    for (const m of filtered) {
+      const slots = historySlots(segmentsOf(m, tz, now), logsFor(m.id), rangeStart, now, now);
+      if (slots.length) map.set(m.id, slots);
+    }
+    return map;
+  }, [filtered, tz, now, logsFor, rangeStart]);
+
+  const visibleDoses = useMemo(
     () =>
-      (doses ?? []).filter(
-        (d) => medicineFilter === "all" || d.medicineId === medicineFilter,
+      (ready?.doses ?? []).filter(
+        (d) => filtered.some((m) => m.id === d.medicineId) && Date.parse(d.takenAt) >= rangeStart,
       ),
-    [doses, medicineFilter],
+    [ready, filtered, rangeStart],
   );
-  const medById = useMemo(
-    () => new Map(medicines.map((m) => [m.id, m])),
-    [medicines],
-  );
-  const activeMeds = useMemo(() => {
-    const ids = new Set(visible.map((d) => d.medicineId));
-    return medicines.filter((m) => ids.has(m.id));
-  }, [visible, medicines]);
 
+  const missed: MissedItem[] = useMemo(
+    () =>
+      [...slotsByMed].flatMap(([medicineId, slots]) =>
+        slots.filter((s) => s.state === "missed").map((slot) => ({ medicineId, slot })),
+      ),
+    [slotsByMed],
+  );
+
+  /** Lateness of a taken dose against its (effective) slot time. */
+  const lateByDose = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const slots of slotsByMed.values()) {
+      for (const s of slots) {
+        if (s.log?.id && s.state === "taken") map.set(s.log.id, s.log.takenAt - s.effectiveAt);
+      }
+    }
+    return map;
+  }, [slotsByMed]);
+
+  const summary = useMemo(() => {
+    let taken = 0;
+    let missedN = 0;
+    let skipped = 0;
+    for (const slots of slotsByMed.values()) {
+      for (const s of slots) {
+        if (s.state === "taken") taken++;
+        else if (s.state === "missed") missedN++;
+        else if (s.state === "skipped") skipped++;
+      }
+    }
+    return { taken, missed: missedN, skipped, total: taken + missedN + skipped };
+  }, [slotsByMed]);
+
+  const { requestLog, dialog } = useDoseLogger({
+    profile: ready?.profile ?? null,
+    timeZone: tz,
+    logsFor,
+    onLogged: reload,
+    onUndone: reload,
+  });
+
+  const laneMeds = useMemo(
+    () => filtered.filter((m) => slotsByMed.has(m.id) || visibleDoses.some((d) => d.medicineId === m.id)),
+    [filtered, slotsByMed, visibleDoses],
+  );
+  const hasScheduledView = slotsByMed.size > 0;
+  const asNeededMeds = laneMeds.filter((m) => !isScheduled(m.mode));
   const selectedMed = medicineFilter === "all" ? null : medById.get(medicineFilter);
+  const exportUrl = (format: string) => `/api/export?format=${format}&personId=${encodeURIComponent(personId ?? "")}`;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">{t("history.title")}</h1>
         <DropdownMenu>
-          <DropdownMenuTrigger
-            className={cn(
-              "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm",
-            )}
-          >
+          <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm">
             <Download className="size-4" /> {t("history.export")}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => window.open(`/api/export?format=csv&personId=${encodeURIComponent(personId ?? "")}`)}>
-              {t("history.exportCsv")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => window.open(`/api/export?format=json&personId=${encodeURIComponent(personId ?? "")}`)}>
-              {t("history.exportJson")}
-            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => window.open(exportUrl("csv"))}>{t("history.exportCsv")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => window.open(exportUrl("json"))}>{t("history.exportJson")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -129,12 +223,11 @@ export function HistoryScreen() {
       </Tabs>
 
       {medicines.length > 1 && (
-        <Select
-          value={medicineFilter}
-          onValueChange={(v) => setMedicineFilter(v ?? "all")}
-        >
+        <Select value={medicineFilter} onValueChange={(v) => setMedicineFilter(v ?? "all")}>
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue>
+              {(v: string) => (v === "all" ? t("history.allMedicines") : (medById.get(v)?.name ?? ""))}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("history.allMedicines")}</SelectItem>
@@ -147,136 +240,330 @@ export function HistoryScreen() {
         </Select>
       )}
 
-      {doses === null ? (
+      {!ready ? (
         <p className="py-12 text-center text-muted-foreground">{t("common.loading")}</p>
-      ) : visible.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-muted-foreground">
-          {t("history.empty")}
-        </Card>
+      ) : visibleDoses.length === 0 && slotsByMed.size === 0 ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">{t("history.empty")}</Card>
       ) : (
         <>
+          {summary.total > 0 && (
+            <p className="text-sm">
+              <span className="text-muted-foreground">{t(`history.summary_${range}`)}: </span>
+              <span className="font-medium">{t("history.summaryTaken", { taken: summary.taken, total: summary.total })}</span>
+              {summary.missed > 0 && (
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  {" · "}
+                  {t("history.summaryMissed", { count: summary.missed })}
+                </span>
+              )}
+              {summary.skipped > 0 && <> · {t("history.summarySkipped", { count: summary.skipped })}</>}
+            </p>
+          )}
+
           {(range === "3d" || range === "week") && (
             <TimelineChart
-              days={RANGE_DAYS[range]!}
-              doses={visible}
-              medicines={activeMeds}
+              start={rangeStart}
+              now={now}
+              tz={tz}
+              doses={visibleDoses}
+              missed={missed}
+              medicines={laneMeds}
               locale={locale}
               onSelect={setEditing}
             />
           )}
-          {(range === "month" || range === "year" || range === "all") && (
-            <AggregateBars
-              range={range}
-              doses={visible}
-              medicines={activeMeds}
-              locale={locale}
-              unitLabel={
-                selectedMed ? selectedMed.unit : t("history.doseList").toLowerCase()
-              }
-              byAmount={!!selectedMed}
-            />
+          {range === "month" &&
+            (hasScheduledView ? (
+              <MonthCalendar start={rangeStart} today={today} tz={tz} slotsByMed={slotsByMed} locale={locale} />
+            ) : (
+              <AggregateBars
+                byDay
+                start={rangeStart}
+                now={now}
+                tz={tz}
+                doses={visibleDoses}
+                medicines={laneMeds}
+                locale={locale}
+                unitLabel={selectedMed ? selectedMed.unit : t("history.doses")}
+                byAmount={!!selectedMed}
+              />
+            ))}
+          {(range === "year" || range === "all") && (
+            <>
+              {hasScheduledView && (
+                <AdherenceBars start={rangeStart} now={now} tz={tz} slotsByMed={slotsByMed} locale={locale} withYear={range === "all"} />
+              )}
+              {asNeededMeds.length > 0 && (
+                <AggregateBars
+                  byDay={false}
+                  start={rangeStart}
+                  now={now}
+                  tz={tz}
+                  doses={visibleDoses.filter((d) => asNeededMeds.some((m) => m.id === d.medicineId))}
+                  medicines={asNeededMeds}
+                  locale={locale}
+                  withYear={range === "all"}
+                  unitLabel={selectedMed ? selectedMed.unit : t("history.doses")}
+                  byAmount={!!selectedMed}
+                />
+              )}
+            </>
           )}
 
-          {activeMeds.length >= 2 && (
+          {laneMeds.length >= 2 && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-              {activeMeds.map((m) => (
+              {laneMeds.map((m) => (
                 <span key={m.id} className="flex items-center gap-1.5">
-                  <span
-                    className="size-2.5 rounded-full"
-                    style={{ background: (colorClasses[m.color] ?? colorClasses.blue).chart }}
-                  />
+                  <span className="size-2.5 rounded-full" style={{ background: (colorClasses[m.color] ?? colorClasses.blue).chart }} />
                   {m.name}
                 </span>
               ))}
+              {missed.length > 0 && (
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="size-2.5 rounded-full border-2 border-muted-foreground" /> {t("history.missedLegend")}
+                </span>
+              )}
             </div>
           )}
 
-          <DoseList
-            doses={visible}
+          <DayList
+            doses={visibleDoses}
+            missed={missed}
+            slotsByMed={slotsByMed}
             medById={medById}
+            lateByDose={lateByDose}
+            tz={tz}
             locale={locale}
-            onSelect={setEditing}
+            meId={meId}
+            onEdit={setEditing}
+            onTookIt={(m, slotAt) => setSheet({ medicine: m, slotAt })}
+            onSkip={(m, slotAt) => requestLog(m, { amount: doseAmountOf(m), takenAt: slotAt, status: "skipped", slotAt })}
           />
         </>
       )}
 
-      <EditDoseDialog
-        dose={editing}
-        medicine={editing ? medById.get(editing.medicineId) ?? null : null}
-        onClose={() => setEditing(null)}
-        onChanged={() => {
-          setEditing(null);
-          void reload();
-        }}
-      />
+      {editing && (
+        <EditDoseDialog
+          dose={editing}
+          medicine={medById.get(editing.medicineId) ?? null}
+          timeZone={tz}
+          onClose={() => setEditing(null)}
+          onChanged={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {sheet && (
+        <LogSheet
+          medicine={sheet.medicine}
+          timeZone={tz}
+          slotAt={sheet.slotAt}
+          initialAt={sheet.slotAt}
+          onClose={() => setSheet(null)}
+          onSubmit={(req) => {
+            const m = sheet.medicine;
+            setSheet(null);
+            requestLog(m, req);
+          }}
+        />
+      )}
+      {dialog}
     </div>
   );
 }
 
-/* ---------- timeline (3 days / week): one lane per medicine, dot per dose ---------- */
+/* ---------- day list: grouped by local day, newest first, logs + missed slots ---------- */
+
+type DayRow =
+  | { kind: "dose"; at: number; dose: DoseDTO }
+  | { kind: "missed"; at: number; item: MissedItem };
+
+function DayList({
+  doses,
+  missed,
+  slotsByMed,
+  medById,
+  lateByDose,
+  tz,
+  locale,
+  meId,
+  onEdit,
+  onTookIt,
+  onSkip,
+}: {
+  doses: DoseDTO[];
+  missed: MissedItem[];
+  slotsByMed: Map<string, HistorySlot[]>;
+  medById: Map<string, MedicineDTO>;
+  lateByDose: Map<string, number>;
+  tz: string;
+  locale: string;
+  meId: string | null;
+  onEdit: (d: DoseDTO) => void;
+  onTookIt: (m: MedicineDTO, slotAt: number) => void;
+  onSkip: (m: MedicineDTO, slotAt: number) => void;
+}) {
+  const t = useTranslations();
+  const days = useMemo(() => {
+    const map = new Map<string, DayRow[]>();
+    const add = (day: string, row: DayRow) => map.set(day, [...(map.get(day) ?? []), row]);
+    for (const d of doses) {
+      const at = Date.parse(d.takenAt);
+      add(localDate(at, tz), { kind: "dose", at, dose: d });
+    }
+    for (const item of missed) add(localDate(item.slot.slotAt, tz), { kind: "missed", at: item.slot.slotAt, item });
+    // Per-day scheduled tally ("5 of 6 taken"), by the day of the slot.
+    const tally = new Map<string, { taken: number; total: number }>();
+    for (const slots of slotsByMed.values()) {
+      for (const s of slots) {
+        if (s.state !== "taken" && s.state !== "missed" && s.state !== "skipped") continue;
+        const day = localDate(s.slotAt, tz);
+        const c = tally.get(day) ?? { taken: 0, total: 0 };
+        c.total++;
+        if (s.state === "taken") c.taken++;
+        tally.set(day, c);
+      }
+    }
+    return [...map.entries()]
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([day, rows]) => ({ day, rows: rows.sort((a, b) => a.at - b.at), tally: tally.get(day) }));
+  }, [doses, missed, slotsByMed, tz]);
+
+  return (
+    <div className="space-y-3">
+      {days.map(({ day, rows, tally }) => (
+        <Card key={day} id={`day-${day}`} className="scroll-mt-20 gap-0 p-0">
+          <h2 className="flex items-center justify-between border-b px-4 py-2 text-sm font-medium">
+            <span>{formatDay(startOfLocalDay(day, tz) + 12 * 3_600_000, locale, tz)}</span>
+            {tally && (
+              <span className={cn("text-xs", tally.taken < tally.total ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+                {t("history.summaryTaken", { taken: tally.taken, total: tally.total })}
+              </span>
+            )}
+          </h2>
+          <ul className="divide-y">
+            {rows.map((row) => {
+              if (row.kind === "missed") {
+                const m = medById.get(row.item.medicineId)!;
+                return (
+                  <li key={`m:${m.id}:${row.at}`}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50">
+                        <span className="w-11 shrink-0 text-sm tabular-nums text-muted-foreground">{formatTime(row.at, locale, tz)}</span>
+                        <span
+                          className="size-2.5 shrink-0 rounded-full border-2"
+                          style={{ borderColor: (colorClasses[m.color] ?? colorClasses.blue).chart }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {m.name} <span className="text-muted-foreground">{formatDose(doseAmountOf(m), m.unit, t)}</span>
+                        </span>
+                        <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                          {t("history.missedBadge")}
+                        </span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => onTookIt(m, row.at)}>{t("history.iTookIt")}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onSkip(m, row.at)}>{t("history.markSkipped")}</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </li>
+                );
+              }
+              const d = row.dose;
+              const m = medById.get(d.medicineId);
+              const colors = colorClasses[m?.color ?? "blue"] ?? colorClasses.blue;
+              const late = lateByDose.get(d.id) ?? 0;
+              return (
+                <li key={d.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50"
+                    onClick={() => onEdit(d)}
+                  >
+                    <span className="w-11 shrink-0 text-sm tabular-nums">{formatTime(row.at, locale, tz)}</span>
+                    <span className={cn("size-2.5 shrink-0 rounded-full", colors.dot, d.status === "uncertain" && "opacity-45")} />
+                    <span className="min-w-0 flex-1">
+                      <span className={cn("block truncate", d.status === "skipped" && "text-muted-foreground")}>
+                        {m?.name} <span className="text-muted-foreground">{m ? formatDose(d.amount, m.unit, t) : formatAmount(d.amount)}</span>
+                      </span>
+                      {d.note && <span className="block truncate text-xs text-muted-foreground">{d.note}</span>}
+                      {d.loggedBy && meId && d.loggedBy.id !== meId && (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {t("people.loggedBy", { name: d.loggedBy.name ?? d.loggedBy.email })}
+                        </span>
+                      )}
+                    </span>
+                    {d.status !== "taken" && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        {d.status === "uncertain" ? t("history.uncertain") : t("history.skipped")}
+                      </span>
+                    )}
+                    {d.status === "taken" && late > LATE_SHOWN_MS && (
+                      <span className="text-xs text-muted-foreground">{t("home.late", { duration: formatDuration(late, t) })}</span>
+                    )}
+                    {d.status === "taken" && m && !isScheduled(m.mode) && (
+                      <span className="text-xs text-muted-foreground">{t("history.asNeededBadge")}</span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- timeline (3 days / week): one lane per medicine ---------- */
 
 function TimelineChart({
-  days,
+  start,
+  now,
+  tz,
   doses,
+  missed,
   medicines,
   locale,
   onSelect,
 }: {
-  days: number;
+  start: number;
+  now: number;
+  tz: string;
   doses: DoseDTO[];
+  missed: MissedItem[];
   medicines: MedicineDTO[];
   locale: string;
   onSelect: (d: DoseDTO) => void;
 }) {
+  const t = useTranslations();
   const [tip, setTip] = useState<TooltipState | null>(null);
   const W = 640;
   const LANE_H = 44;
   const AXIS_H = 24;
   const H = medicines.length * LANE_H + AXIS_H;
-  const now = Date.now();
-  const start = now - days * 24 * 3_600_000;
   const x = (time: number) => ((time - start) / (now - start)) * W;
 
-  // Day boundaries for grid lines.
-  const dayMarks: Date[] = [];
-  const d0 = new Date(start);
-  d0.setHours(0, 0, 0, 0);
-  for (let d = new Date(d0); d.getTime() <= now; d.setDate(d.getDate() + 1)) {
-    if (d.getTime() >= start) dayMarks.push(new Date(d));
-  }
+  const dayMarks: number[] = [];
+  for (let d = localDate(start, tz); startOfLocalDay(d, tz) <= now; d = addDays(d, 1)) dayMarks.push(startOfLocalDay(d, tz));
 
   const laneMax = new Map(
-    medicines.map((m) => [
-      m.id,
-      Math.max(...doses.filter((d) => d.medicineId === m.id).map((d) => d.amount), 1),
-    ]),
+    medicines.map((m) => [m.id, Math.max(...doses.filter((d) => d.medicineId === m.id).map((d) => d.amount), 1)]),
   );
+  const hover = (e: React.MouseEvent<SVGElement>, cx: number, cy: number, lines: string[]) => {
+    const rect = e.currentTarget.closest("svg")!.getBoundingClientRect();
+    setTip({ x: (cx / W) * rect.width, y: (cy / H) * rect.height, lines });
+  };
 
   return (
     <Card className="relative gap-0 overflow-x-auto p-3">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ minWidth: 320 }}
-        role="img"
-      >
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img">
         {dayMarks.map((d) => (
-          <g key={d.getTime()}>
-            <line
-              x1={x(d.getTime())}
-              x2={x(d.getTime())}
-              y1={0}
-              y2={H - AXIS_H}
-              className="stroke-border"
-              strokeWidth={1}
-            />
-            <text
-              x={x(d.getTime()) + 4}
-              y={H - 8}
-              className="fill-muted-foreground"
-              fontSize={11}
-            >
-              {formatDay(d, locale)}
+          <g key={d}>
+            <line x1={x(d)} x2={x(d)} y1={0} y2={H - AXIS_H} className="stroke-border" strokeWidth={1} />
+            <text x={x(d) + 4} y={H - 8} className="fill-muted-foreground" fontSize={11}>
+              {formatDay(d, locale, tz)}
             </text>
           </g>
         ))}
@@ -285,47 +572,46 @@ function TimelineChart({
           const cy = i * LANE_H + LANE_H / 2;
           return (
             <g key={m.id}>
-              <line
-                x1={0}
-                x2={W}
-                y1={cy}
-                y2={cy}
-                className="stroke-border"
-                strokeWidth={1}
-                strokeDasharray="2 4"
-              />
+              <line x1={0} x2={W} y1={cy} y2={cy} className="stroke-border" strokeWidth={1} strokeDasharray="2 4" />
+              {missed
+                .filter((it) => it.medicineId === m.id && it.slot.slotAt >= start)
+                .map((it) => {
+                  const cx = x(it.slot.slotAt);
+                  return (
+                    <circle
+                      key={`miss-${it.slot.slotAt}`}
+                      cx={cx}
+                      cy={cy}
+                      r={6}
+                      fill="var(--background)"
+                      stroke={color}
+                      strokeWidth={2.5}
+                      onMouseEnter={(e) =>
+                        hover(e, cx, cy, [`${m.name} · ${t("history.missedBadge")}`, `${formatDay(it.slot.slotAt, locale, tz)} ${formatTime(it.slot.slotAt, locale, tz)}`])
+                      }
+                      onMouseLeave={() => setTip(null)}
+                    />
+                  );
+                })}
               {doses
-                .filter(
-                  (d) =>
-                    d.medicineId === m.id &&
-                    d.status !== "skipped" &&
-                    new Date(d.takenAt).getTime() >= start,
-                )
+                .filter((d) => d.medicineId === m.id && d.status !== "skipped")
                 .map((d) => {
-                  const time = new Date(d.takenAt);
-                  const r = 5 + (d.amount / laneMax.get(m.id)!) * 4;
+                  const time = Date.parse(d.takenAt);
+                  const cx = x(time);
                   return (
                     <circle
                       key={d.id}
-                      cx={x(time.getTime())}
+                      cx={cx}
                       cy={cy}
-                      r={r}
+                      r={5 + (d.amount / laneMax.get(m.id)!) * 4}
                       fill={color}
                       opacity={d.status === "uncertain" ? 0.45 : 1}
                       className="cursor-pointer stroke-background"
                       strokeWidth={2}
                       onClick={() => onSelect(d)}
-                      onMouseEnter={(e) => {
-                        const rect = e.currentTarget.closest("svg")!.getBoundingClientRect();
-                        setTip({
-                          x: ((x(time.getTime()) / W) * rect.width),
-                          y: (cy / H) * rect.height,
-                          lines: [
-                            `${m.name} · ${formatAmount(d.amount)} ${m.unit}`,
-                            `${formatDay(time, locale)} ${formatTime(time, locale)}`,
-                          ],
-                        });
-                      }}
+                      onMouseEnter={(e) =>
+                        hover(e, cx, cy, [`${m.name} · ${formatDose(d.amount, m.unit, t)}`, `${formatDay(time, locale, tz)} ${formatTime(time, locale, tz)}`])
+                      }
                       onMouseLeave={() => setTip(null)}
                     />
                   );
@@ -339,119 +625,285 @@ function TimelineChart({
   );
 }
 
-/* ---------- aggregate bars (month / year / all) ---------- */
+/* ---------- month: calendar grid of complete / partly / nothing taken ---------- */
+
+function MonthCalendar({
+  start,
+  today,
+  tz,
+  slotsByMed,
+  locale,
+}: {
+  start: number;
+  today: string;
+  tz: string;
+  slotsByMed: Map<string, HistorySlot[]>;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const first = localDate(start, tz);
+  const tally = new Map<string, { taken: number; total: number }>();
+  for (const slots of slotsByMed.values()) {
+    for (const s of slots) {
+      if (s.state !== "taken" && s.state !== "missed" && s.state !== "skipped") continue;
+      const day = localDate(s.slotAt, tz);
+      const c = tally.get(day) ?? { taken: 0, total: 0 };
+      c.total++;
+      if (s.state === "taken") c.taken++;
+      tally.set(day, c);
+    }
+  }
+  const lead = weekdayMon0(first);
+  const cells: (string | null)[] = Array.from({ length: lead }, () => null);
+  for (let d = first; d <= today; d = addDays(d, 1)) cells.push(d);
+  // Weekday headers from a known Monday.
+  const weekdays = Array.from({ length: 7 }, (_, i) =>
+    new Intl.DateTimeFormat(locale === "nb" ? "nb-NO" : "en-GB", { weekday: "narrow", timeZone: "UTC" }).format(
+      Date.UTC(2024, 0, 1 + i),
+    ),
+  );
+
+  return (
+    <Card className="gap-2 p-3">
+      <div className="grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
+        {weekdays.map((w, i) => (
+          <span key={i}>{w}</span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, i) => {
+          if (!day) return <span key={`pad-${i}`} />;
+          const c = tally.get(day);
+          const status = !c ? "none" : c.taken === c.total ? "complete" : c.taken === 0 ? "nothing" : "partly";
+          return (
+            <button
+              key={day}
+              type="button"
+              disabled={!c}
+              onClick={() => document.getElementById(`day-${day}`)?.scrollIntoView({ behavior: "smooth" })}
+              title={c ? t("history.summaryTaken", { taken: c.taken, total: c.total }) : undefined}
+              className="flex flex-col items-center gap-0.5 rounded-lg py-1 text-xs hover:bg-accent/50 disabled:hover:bg-transparent"
+            >
+              <span className={cn(day === today && "font-bold")}>{Number(day.slice(8))}</span>
+              <DayMarker status={status} />
+              <span className="h-3 text-[10px] leading-3 text-muted-foreground">
+                {c && status !== "complete" ? `${c.taken}/${c.total}` : ""}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1"><DayMarker status="complete" /> {t("history.calComplete")}</span>
+        <span className="flex items-center gap-1"><DayMarker status="partly" /> {t("history.calPartly")}</span>
+        <span className="flex items-center gap-1"><DayMarker status="nothing" /> {t("history.calNothing")}</span>
+      </div>
+    </Card>
+  );
+}
+
+/** Shape carries the meaning (filled / half / ring), not only color. */
+function DayMarker({ status }: { status: "complete" | "partly" | "nothing" | "none" }) {
+  if (status === "none") return <span className="size-4" />;
+  return (
+    <svg viewBox="0 0 16 16" className="size-4" aria-hidden>
+      {status === "complete" && (
+        <>
+          <circle cx={8} cy={8} r={7} className="fill-teal-600" />
+          <path d="M4.8 8.3l2.1 2.1 4.3-4.6" fill="none" stroke="white" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+      {status === "partly" && (
+        <>
+          <circle cx={8} cy={8} r={6.25} fill="none" className="stroke-amber-600" strokeWidth={1.5} />
+          <path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" className="fill-amber-600" />
+        </>
+      )}
+      {status === "nothing" && <circle cx={8} cy={8} r={6.25} fill="none" className="stroke-muted-foreground" strokeWidth={1.5} strokeDasharray="2 2" />}
+    </svg>
+  );
+}
+
+/* ---------- year / all: share of slots taken per month (scheduled) ---------- */
+
+function monthBuckets(start: number, now: number, tz: string) {
+  const out: { key: string; at: number }[] = [];
+  let d = `${localDate(start, tz).slice(0, 7)}-01`;
+  while (startOfLocalDay(d, tz) <= now) {
+    out.push({ key: d.slice(0, 7), at: startOfLocalDay(d, tz) });
+    const [y, m] = d.split("-").map(Number);
+    d = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  }
+  return out;
+}
+
+function AdherenceBars({
+  start,
+  now,
+  tz,
+  slotsByMed,
+  locale,
+  withYear,
+}: {
+  start: number;
+  now: number;
+  tz: string;
+  slotsByMed: Map<string, HistorySlot[]>;
+  locale: string;
+  withYear: boolean;
+}) {
+  const t = useTranslations();
+  const [tip, setTip] = useState<TooltipState | null>(null);
+  const buckets = monthBuckets(start, now, tz).map((b) => ({ ...b, taken: 0, total: 0 }));
+  const byKey = new Map(buckets.map((b) => [b.key, b]));
+  for (const slots of slotsByMed.values()) {
+    for (const s of slots) {
+      if (s.state !== "taken" && s.state !== "missed" && s.state !== "skipped") continue;
+      const b = byKey.get(localDate(s.slotAt, tz).slice(0, 7));
+      if (!b) continue;
+      b.total++;
+      if (s.state === "taken") b.taken++;
+    }
+  }
+  const W = 640;
+  const H = 160;
+  const AXIS_H = 20;
+  const step = W / Math.max(1, buckets.length);
+  const bw = Math.min(28, step * 0.7);
+  const y = (share: number) => (H - AXIS_H) * (1 - share);
+
+  return (
+    <Card className="relative gap-1 overflow-x-auto p-3">
+      <p className="px-1 text-xs text-muted-foreground">{t("history.adherence")}</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img">
+        {[0.5, 1].map((g) => (
+          <g key={g}>
+            <line x1={0} x2={W} y1={y(g)} y2={y(g)} className="stroke-border" strokeDasharray="2 4" />
+            <text x={W - 2} y={y(g) - 3} textAnchor="end" fontSize={10} className="fill-muted-foreground">
+              {g * 100}%
+            </text>
+          </g>
+        ))}
+        <line x1={0} x2={W} y1={H - AXIS_H} y2={H - AXIS_H} className="stroke-border" />
+        {buckets.map((b, i) => {
+          const cx = i * step + step / 2;
+          const share = b.total ? b.taken / b.total : 0;
+          return (
+            <g
+              key={b.key}
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.closest("svg")!.getBoundingClientRect();
+                setTip({
+                  x: (cx / W) * rect.width,
+                  y: (y(share) / H) * rect.height,
+                  lines: [formatMonth(b.at, locale, true, tz), b.total ? t("history.summaryTaken", { taken: b.taken, total: b.total }) : "—"],
+                });
+              }}
+              onMouseLeave={() => setTip(null)}
+            >
+              <rect x={i * step} y={0} width={step} height={H - AXIS_H} fill="transparent" />
+              {b.total > 0 && (
+                <rect x={cx - bw / 2} y={y(share)} width={bw} height={Math.max(2, H - AXIS_H - y(share))} rx={2} className="fill-teal-600" />
+              )}
+              {(buckets.length <= 12 || i % Math.ceil(buckets.length / 12) === 0) && (
+                <text x={cx} y={H - 5} textAnchor="middle" fontSize={10} className="fill-muted-foreground">
+                  {formatMonth(b.at, locale, withYear, tz)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {tip && <ChartTooltip tip={tip} />}
+    </Card>
+  );
+}
+
+/* ---------- as-needed count / amount bars (month: per day; year / all: per month) ---------- */
 
 function AggregateBars({
-  range,
+  byDay,
+  start,
+  now,
+  tz,
   doses,
   medicines,
   locale,
   unitLabel,
   byAmount,
+  withYear = false,
 }: {
-  range: "month" | "year" | "all";
+  byDay: boolean;
+  start: number;
+  now: number;
+  tz: string;
   doses: DoseDTO[];
   medicines: MedicineDTO[];
   locale: string;
   unitLabel: string;
   /** Single medicine selected → sum amounts; otherwise count doses. */
   byAmount: boolean;
+  withYear?: boolean;
 }) {
   const t = useTranslations();
   const [tip, setTip] = useState<TooltipState | null>(null);
-
-  // Bucket by day (month view) or by month (year/all).
-  const byDay = range === "month";
   const buckets = useMemo(() => {
-    const map = new Map<string, { label: string; date: Date; perMed: Map<string, number> }>();
-    const counted = doses.filter((d) => d.status !== "skipped");
-    const keyOf = (dt: Date) =>
-      byDay
-        ? `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`
-        : `${dt.getFullYear()}-${dt.getMonth()}`;
-
-    // Seed the full window so empty days/months still show.
-    const first = counted.length
-      ? new Date(Math.min(...counted.map((d) => new Date(d.takenAt).getTime())))
-      : new Date();
-    const start = byDay
-      ? new Date(Date.now() - 29 * 24 * 3_600_000)
-      : range === "year"
-        ? new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1)
-        : new Date(first.getFullYear(), first.getMonth(), 1);
-    const cursor = new Date(start);
-    cursor.setHours(0, 0, 0, 0);
-    if (!byDay) cursor.setDate(1);
-    while (cursor.getTime() <= Date.now()) {
-      const label = byDay
-        ? String(cursor.getDate())
-        : new Intl.DateTimeFormat(locale === "nb" ? "nb-NO" : "en-GB", {
-            month: "short",
-            ...(range === "all" ? { year: "2-digit" } : {}),
-          }).format(cursor);
-      map.set(keyOf(cursor), { label, date: new Date(cursor), perMed: new Map() });
-      if (byDay) cursor.setDate(cursor.getDate() + 1);
-      else cursor.setMonth(cursor.getMonth() + 1);
+    const list: { key: string; label: string; at: number; perMed: Map<string, number> }[] = [];
+    if (byDay) {
+      for (let d = localDate(start, tz); startOfLocalDay(d, tz) <= now; d = addDays(d, 1)) {
+        list.push({ key: d, label: String(Number(d.slice(8))), at: startOfLocalDay(d, tz), perMed: new Map() });
+      }
+    } else {
+      for (const b of monthBuckets(start, now, tz)) {
+        list.push({ key: b.key, label: formatMonth(b.at, locale, withYear, tz), at: b.at, perMed: new Map() });
+      }
     }
-    for (const d of counted) {
-      const b = map.get(keyOf(new Date(d.takenAt)));
+    const map = new Map(list.map((b) => [b.key, b]));
+    for (const d of doses) {
+      if (d.status === "skipped") continue;
+      const day = localDate(Date.parse(d.takenAt), tz);
+      const b = map.get(byDay ? day : day.slice(0, 7));
       if (!b) continue;
-      const v = byAmount ? d.amount : 1;
-      b.perMed.set(d.medicineId, (b.perMed.get(d.medicineId) ?? 0) + v);
+      b.perMed.set(d.medicineId, (b.perMed.get(d.medicineId) ?? 0) + (byAmount ? d.amount : 1));
     }
-    return [...map.values()];
-  }, [doses, byDay, byAmount, range, locale]);
+    return list;
+  }, [byDay, start, now, tz, doses, byAmount, locale, withYear]);
 
   const W = 640;
   const H = 180;
   const AXIS_H = 20;
-  const maxTotal = Math.max(
-    ...buckets.map((b) => [...b.perMed.values()].reduce((s, v) => s + v, 0)),
-    1,
-  );
-  const bw = Math.min(24, (W / buckets.length) * 0.7);
-  const step = W / buckets.length;
+  const maxTotal = Math.max(...buckets.map((b) => [...b.perMed.values()].reduce((s, v) => s + v, 0)), 1);
+  const step = W / Math.max(1, buckets.length);
+  const bw = Math.min(24, step * 0.7);
   const y = (v: number) => (H - AXIS_H) * (1 - v / maxTotal);
 
   return (
     <Card className="relative gap-1 overflow-x-auto p-3">
       <p className="px-1 text-xs text-muted-foreground">
-        {t("history.dailyTotals")} · {unitLabel}
+        {t(byDay ? "history.dailyTotals" : "history.monthlyTotals")} · {unitLabel}
       </p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img">
-        <line
-          x1={0}
-          x2={W}
-          y1={H - AXIS_H}
-          y2={H - AXIS_H}
-          className="stroke-border"
-          strokeWidth={1}
-        />
+        <line x1={0} x2={W} y1={H - AXIS_H} y2={H - AXIS_H} className="stroke-border" strokeWidth={1} />
         {buckets.map((b, i) => {
           let acc = 0;
           const cx = i * step + step / 2;
           const total = [...b.perMed.values()].reduce((s, v) => s + v, 0);
           return (
             <g
-              key={i}
+              key={b.key}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.closest("svg")!.getBoundingClientRect();
                 setTip({
                   x: (cx / W) * rect.width,
                   y: (y(total) / H) * rect.height,
                   lines: [
-                    formatDay(b.date, locale),
-                    ...medicines
-                      .filter((m) => b.perMed.get(m.id))
-                      .map(
-                        (m) => `${m.name}: ${formatAmount(b.perMed.get(m.id)!)}`,
-                      ),
+                    byDay ? formatDay(b.at, locale, tz) : formatMonth(b.at, locale, true, tz),
+                    ...medicines.filter((m) => b.perMed.get(m.id)).map((m) => `${m.name}: ${formatAmount(b.perMed.get(m.id)!)}`),
                   ],
                 });
               }}
               onMouseLeave={() => setTip(null)}
             >
-              {/* invisible full-height hit target */}
               <rect x={i * step} y={0} width={step} height={H - AXIS_H} fill="transparent" />
               {medicines.map((m) => {
                 const v = b.perMed.get(m.id);
@@ -472,13 +924,7 @@ function AggregateBars({
                 );
               })}
               {(buckets.length <= 12 || i % Math.ceil(buckets.length / 12) === 0) && (
-                <text
-                  x={cx}
-                  y={H - 5}
-                  textAnchor="middle"
-                  fontSize={10}
-                  className="fill-muted-foreground"
-                >
+                <text x={cx} y={H - 5} textAnchor="middle" fontSize={10} className="fill-muted-foreground">
                   {b.label}
                 </text>
               )}
@@ -503,73 +949,5 @@ function ChartTooltip({ tip }: { tip: TooltipState }) {
         </div>
       ))}
     </div>
-  );
-}
-
-/* ---------- dose list ---------- */
-
-function DoseList({
-  doses,
-  medById,
-  locale,
-  onSelect,
-}: {
-  doses: DoseDTO[];
-  medById: Map<string, MedicineDTO>;
-  locale: string;
-  onSelect: (d: DoseDTO) => void;
-}) {
-  const t = useTranslations();
-  const { meId } = usePersons();
-  const shown = doses.slice(0, 100);
-  return (
-    <Card className="gap-0 p-0">
-      <h2 className="border-b px-4 py-2.5 text-sm font-medium text-muted-foreground">
-        {t("history.doseList")}
-      </h2>
-      <ul className="divide-y">
-        {shown.map((d) => {
-          const m = medById.get(d.medicineId);
-          const time = new Date(d.takenAt);
-          const colors = colorClasses[m?.color ?? "blue"] ?? colorClasses.blue;
-          return (
-            <li key={d.id}>
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50"
-                onClick={() => onSelect(d)}
-              >
-                <span className={cn("size-2.5 shrink-0 rounded-full", colors.dot)} />
-                <span className="flex-1">
-                  <span className="font-medium">
-                    {formatAmount(d.amount)} {m?.unit} {m?.name}
-                  </span>
-                  {d.status !== "taken" && (
-                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                      {d.status === "uncertain"
-                        ? t("history.uncertain")
-                        : t("history.skipped")}
-                    </span>
-                  )}
-                  {d.note && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {d.note}
-                    </span>
-                  )}
-                  {d.loggedBy && meId && d.loggedBy.id !== meId && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {t("people.loggedBy", { name: d.loggedBy.name ?? d.loggedBy.email })}
-                    </span>
-                  )}
-                </span>
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  {formatDay(time, locale)} {formatTime(time, locale)}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </Card>
   );
 }

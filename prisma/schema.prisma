@@ -13,9 +13,11 @@ model User {
   name           String?
   locale         String     @default("en")
   theme          String     @default("system")
-  strictness     Float      @default(0.15)
-  wakeWindowH    Float      @default(12)
   countUncertain Boolean    @default(true)
+  remindersOn    Boolean    @default(true)
+  remindLeadMin  Int        @default(10)
+  nagEveryMin    Int        @default(15)
+  nagMaxMin      Int        @default(120)
   onboarded      Boolean    @default(false)
   defaultPersonId String?
   defaultPerson   Person?    @relation("DefaultPerson", fields: [defaultPersonId], references: [id], onDelete: SetNull)
@@ -25,12 +27,15 @@ model User {
   createdPersons Person[]   @relation("CreatedPersons")
   access         PersonAccess[]
   shareTokens    ShareToken[] @relation("TokenCreator")
+  pushSubscriptions PushSubscription[]
+  reminderLogs   ReminderLog[]
 }
 
 model Person {
   id           String         @id @default(cuid())
   name         String
   kind         String         @default("person")
+  timezone     String         @default("Europe/Oslo")
   selfOfUserId String?        @unique
   selfOf       User?          @relation("SelfPerson", fields: [selfOfUserId], references: [id], onDelete: Cascade)
   createdById  String
@@ -47,6 +52,7 @@ model PersonAccess {
   person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders Boolean  @default(false)
   createdAt DateTime @default(now())
 
   @@id([personId, userId])
@@ -79,13 +85,23 @@ model Medicine {
   maxPerIntake   Float?
   maxPerDay      Float?
   minIntervalMin Int?
-  scheduleHints  String?
+  mode           String?
+  doseAmount     Float?
+  times          String?
+  intervalH      Float?
+  startsOn       String?
+  endsOn         String?
+  remindersEnabled Boolean @default(true)
+  scheduleReviewedAt DateTime?
+  scheduleChangedAt  DateTime?
   notes          String?
   sortOrder      Int       @default(0)
   hidden         Boolean   @default(false)
   archivedAt     DateTime?
   createdAt      DateTime  @default(now())
   doses          DoseLog[]
+  scheduleVersions ScheduleVersion[]
+  reminderLogs   ReminderLog[]
 
   @@index([personId, archivedAt])
 }
@@ -98,6 +114,7 @@ model DoseLog {
   medicine   Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
   amount     Float
   takenAt    DateTime
+  slotAt     DateTime?
   status     String   @default("taken")
   note       String?
   createdAt  DateTime @default(now())
@@ -105,4 +122,57 @@ model DoseLog {
 
   @@index([userId, takenAt])
   @@index([medicineId, takenAt])
+  @@index([medicineId, slotAt])
+}
+
+/// A schedule that was in force until `validTo`; kept so history derives past
+/// missed slots from the schedule of that time.
+model ScheduleVersion {
+  id             String   @id @default(cuid())
+  medicineId     String
+  medicine       Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  mode           String
+  doseAmount     Float?
+  times          String?
+  intervalH      Float?
+  startsOn       String?
+  endsOn         String?
+  minIntervalMin Int?
+  timezone       String
+  validFrom      DateTime
+  validTo        DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([medicineId, validTo])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// One row per reminder sent (or snooze pressed). The unique key makes sending
+/// idempotent across restarts. Pruned after 7 days.
+model ReminderLog {
+  id         String    @id @default(cuid())
+  medicineId String
+  medicine   Medicine  @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  slotAt     DateTime
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       String
+  seq        Int       @default(0)
+  until      DateTime?
+  sentAt     DateTime  @default(now())
+
+  @@unique([medicineId, slotAt, userId, kind, seq])
+  @@index([sentAt])
 }

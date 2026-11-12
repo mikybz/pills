@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -37,17 +37,11 @@ export function PeopleSection() {
   const searchParams = useSearchParams();
   const [editing, setEditing] = useState<PersonDTO | "new" | null>(null);
   const [sharing, setSharing] = useState<PersonDTO | null>(null);
-  const [joinOpen, setJoinOpen] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
-
   // Deep link: /settings?join=CODE opens the join dialog prefilled.
+  const [joinCode, setJoinCode] = useState(() => searchParams.get("join") ?? "");
+  const [joinOpen, setJoinOpen] = useState(() => searchParams.get("join") !== null);
   useEffect(() => {
-    const code = searchParams.get("join");
-    if (code) {
-      setJoinCode(code);
-      setJoinOpen(true);
-      window.history.replaceState(null, "", "/settings#people");
-    }
+    if (searchParams.get("join")) window.history.replaceState(null, "", "/settings#people");
   }, [searchParams]);
 
   const effectiveDefault =
@@ -153,17 +147,18 @@ export function PeopleSection() {
         </ul>
       </Card>
 
-      <PersonDialog
-        person={editing === "new" ? null : editing}
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        onChanged={async (createdId) => {
-          setEditing(null);
-          await reload();
-          if (createdId) setCurrentId(createdId);
-        }}
-      />
-      <ShareDialog person={sharing} onClose={() => setSharing(null)} />
+      {editing !== null && (
+        <PersonDialog
+          person={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onChanged={async (createdId) => {
+            setEditing(null);
+            await reload();
+            if (createdId) setCurrentId(createdId);
+          }}
+        />
+      )}
+      {sharing && <ShareDialog person={sharing} onClose={() => setSharing(null)} />}
       <JoinDialog
         open={joinOpen}
         code={joinCode}
@@ -186,26 +181,25 @@ export function PeopleSection() {
 
 function PersonDialog({
   person,
-  open,
   onClose,
   onChanged,
 }: {
   person: PersonDTO | null;
-  open: boolean;
   onClose: () => void;
   onChanged: (createdId?: string) => void;
 }) {
   const t = useTranslations("people");
   const tc = useTranslations("common");
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<string>("person");
+  const [name, setName] = useState(person?.name ?? "");
+  const [kind, setKind] = useState<string>(person?.kind ?? "person");
+  const [timezone, setTimezone] = useState(
+    () => person?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(person?.name ?? "");
-    setKind(person?.kind ?? "person");
-  }, [open, person]);
+  const zones = useMemo(() => {
+    const all = Intl.supportedValuesOf("timeZone");
+    return all.includes(timezone) ? all : [timezone, ...all];
+  }, [timezone]);
 
   async function save() {
     if (!name.trim()) return;
@@ -213,7 +207,7 @@ function PersonDialog({
     try {
       const res = await api<PersonDTO>(person ? `/api/persons/${person.id}` : "/api/persons", {
         method: person ? "PATCH" : "POST",
-        body: JSON.stringify({ name: name.trim(), kind }),
+        body: JSON.stringify({ name: name.trim(), kind, timezone }),
       });
       onChanged(person ? undefined : res.id);
     } catch {
@@ -248,7 +242,7 @@ function PersonDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90dvh] max-w-sm overflow-y-auto rounded-2xl">
         <DialogHeader>
           <DialogTitle>{person ? t("edit") : t("new")}</DialogTitle>
@@ -283,6 +277,25 @@ function PersonDialog({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <Label className="mb-1.5 block" htmlFor="person-tz">
+              {t("timezone")}
+            </Label>
+            <select
+              id="person-tz"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="h-9 w-full rounded-lg border bg-transparent px-2.5 text-sm"
+            >
+              {zones.map((z) => (
+                <option key={z} value={z}>
+                  {z.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">{t("timezoneHint")}</p>
           </div>
 
           {person && (
@@ -341,30 +354,27 @@ function PersonDialog({
   );
 }
 
-function ShareDialog({ person, onClose }: { person: PersonDTO | null; onClose: () => void }) {
+function ShareDialog({ person, onClose }: { person: PersonDTO; onClose: () => void }) {
   const t = useTranslations("people");
   const tc = useTranslations("common");
   const locale = useLocale();
   const [share, setShare] = useState<{ code: string; expiresAt: string } | null>(null);
-
-  const generate = useCallback(async () => {
-    if (!person) return;
-    setShare(null);
-    try {
-      setShare(
-        await api<{ code: string; expiresAt: string }>(`/api/persons/${person.id}/share`, {
-          method: "POST",
-        }),
-      );
-    } catch {
-      toast.error(tc("error"));
-    }
-  }, [person, tc]);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
-    if (person) void generate();
-    else setShare(null);
-  }, [person, generate]);
+    let alive = true;
+    api<{ code: string; expiresAt: string }>(`/api/persons/${person.id}/share`, { method: "POST" })
+      .then((s) => alive && setShare(s))
+      .catch(() => toast.error(tc("error")));
+    return () => {
+      alive = false;
+    };
+  }, [person.id, round, tc]);
+
+  const generate = () => {
+    setShare(null);
+    setRound((r) => r + 1);
+  };
 
   const link = share
     ? `${window.location.origin}/settings?join=${encodeURIComponent(share.code)}`
@@ -380,10 +390,10 @@ function ShareDialog({ person, onClose }: { person: PersonDTO | null; onClose: (
   }
 
   return (
-    <Dialog open={person !== null} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm rounded-2xl">
         <DialogHeader>
-          <DialogTitle>{t("shareTitle", { name: person?.name ?? "" })}</DialogTitle>
+          <DialogTitle>{t("shareTitle", { name: person.name })}</DialogTitle>
           <DialogDescription>{t("shareHint")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -409,7 +419,7 @@ function ShareDialog({ person, onClose }: { person: PersonDTO | null; onClose: (
               onClick={async () => {
                 if (navigator.share) {
                   try {
-                    await navigator.share({ title: t("shareTitle", { name: person!.name }), url: link });
+                    await navigator.share({ title: t("shareTitle", { name: person.name }), url: link });
                     return;
                   } catch {
                     // fall through to copy
