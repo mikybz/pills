@@ -48,8 +48,8 @@ import {
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
-const FORMS = ["pill", "tablet", "capsule", "spray", "drops", "injection", "liquid", "other"] as const;
-const UNITS = ["pcs", "mg", "µg", "g", "ml", "IU", "puffs"];
+const FORMS = ["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"] as const;
+const UNITS = ["pcs", "appl", "mg", "µg", "g", "ml", "IU", "puffs"];
 
 type Freq = "1" | "2" | "3" | "4" | "everyN" | "asNeeded";
 type Course = "none" | "days" | "date";
@@ -183,6 +183,16 @@ export function MedicineDialog({
       times[i] = v;
       return { ...p, times };
     });
+  }
+
+  /** Creams are counted in applications: switch pcs ↔ appl along with the form. */
+  function chooseForm(form: string) {
+    setS((p) => ({
+      ...p,
+      form,
+      unit:
+        form === "cream" && p.unit === "pcs" ? "appl" : form !== "cream" && p.unit === "appl" ? "pcs" : p.unit,
+    }));
   }
 
   function shiftOthers() {
@@ -606,7 +616,7 @@ export function MedicineDialog({
 
               <div>
                 <Label className="mb-1.5 block">{t("medicine.form")}</Label>
-                <Select value={s.form} onValueChange={(v) => v && set("form", v)}>
+                <Select value={s.form} onValueChange={(v) => v && chooseForm(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue>{(v: string) => t(`medicine.form_${v}`)}</SelectValue>
                   </SelectTrigger>

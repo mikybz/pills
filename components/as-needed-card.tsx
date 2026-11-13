@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { asNeededStatus } from "@/lib/safety";
 import type { LogEntry } from "@/lib/schedule";
-import { formatAmount, formatDose, formatRelative, formatTime } from "@/lib/format";
+import { formatAmount, formatDose, formatRelative, formatTime, isCountUnit } from "@/lib/format";
 import { colorClasses, doseAmountOf, parsePresets, type MedicineDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +48,7 @@ export function AsNeededCard({
     facts.push(
       t("home.usedOf", {
         used: formatAmount(status.used),
-        max: medicine.unit === "pcs" ? formatAmount(status.max) : `${formatAmount(status.max)} ${medicine.unit}`,
+        max: isCountUnit(medicine.unit) ? formatAmount(status.max) : `${formatAmount(status.max)} ${medicine.unit}`,
       }),
     );
   }

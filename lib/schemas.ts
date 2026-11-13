@@ -43,7 +43,7 @@ export const medicineSchema = z.object({
   personId: z.string().min(1).optional(),
   name: z.string().trim().min(1).max(100),
   form: z
-    .enum(["pill", "tablet", "capsule", "spray", "drops", "injection", "liquid", "other"])
+    .enum(["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"])
     .default("pill"),
   unit: z.string().min(1).max(10).default("pcs"),
   color: z.string().max(20).default("blue"),

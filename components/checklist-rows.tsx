@@ -15,6 +15,9 @@ import type { LogEntry, Slot } from "@/lib/schedule";
 import { colorClasses, doseAmountOf, type MedicineDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+/** Messages pick their verb by form: "Apply" for creams, "Take" otherwise. */
+const verbForm = (m: Pick<MedicineDTO, "form">) => (m.form === "cream" ? "cream" : "other");
+
 export function Section({ title, children, tone }: { title: string; children: React.ReactNode; tone?: "alert" }) {
   return (
     <section className="space-y-1.5">
@@ -132,7 +135,7 @@ export function DueRow({
         }
       />
       <Button className="h-10 px-4" onClick={onTake}>
-        {t("home.take")}
+        {t("home.take", { form: verbForm(medicine) })}
       </Button>
       <MoreButton onClick={onMore} />
     </li>
@@ -164,7 +167,7 @@ export function MissedRow({
       </div>
       <div className="flex gap-2 pl-15">
         <Button size="sm" variant="outline" onClick={onTakeLate}>
-          {t("home.takeLate")}
+          {t("home.takeLate", { form: verbForm(medicine) })}
         </Button>
         <Button size="sm" variant="ghost" onClick={onSkip}>
           {t("home.skip")}
@@ -199,7 +202,7 @@ export function LaterRow({
           <Ellipsis className="size-5 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onClick={onTakeNow}>{t("home.takeNowEarly")}</DropdownMenuItem>
+          <DropdownMenuItem onClick={onTakeNow}>{t("home.takeNowEarly", { form: verbForm(medicine) })}</DropdownMenuItem>
           <DropdownMenuItem onClick={onSkip}>{t("home.skip")}</DropdownMenuItem>
           <DropdownMenuItem onClick={onMore}>{t("home.moreOptions")}</DropdownMenuItem>
         </DropdownMenuContent>

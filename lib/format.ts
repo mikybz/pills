@@ -76,15 +76,20 @@ export function formatAmount(n: number) {
   return Number(n.toFixed(3)).toString();
 }
 
-/** "1 tablet", "2 tablets", "5 mg". `t` is a translator rooted at the message catalog. */
+/** Counted units are words ("2 tablets", "1 application"), not abbreviations. */
+export function isCountUnit(unit: string): unit is "pcs" | "appl" {
+  return unit === "pcs" || unit === "appl";
+}
+
+/** "1 tablet", "2 tablets", "1 application", "5 mg". `t` is a translator rooted at the message catalog. */
 export function formatDose(amount: number, unit: string, t: Translate) {
-  if (unit === "pcs") return t("units.pcs", { count: amount, amount: formatAmount(amount) });
+  if (isCountUnit(unit)) return t(`units.${unit}`, { count: amount, amount: formatAmount(amount) });
   return `${formatAmount(amount)} ${unit}`;
 }
 
-/** Unit name for pickers ("tablets" for pcs). */
+/** Unit name for pickers ("tablets" for pcs, "applications" for appl). */
 export function unitLabel(unit: string, t: Translate) {
-  return unit === "pcs" ? t("units.pcsName") : unit;
+  return isCountUnit(unit) ? t(`units.${unit}Name`) : unit;
 }
 
 /** "1 h 20 min" / "40 min". */

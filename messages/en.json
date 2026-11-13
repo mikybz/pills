@@ -10,7 +10,9 @@
   },
   "units": {
     "pcs": "{amount} {count, plural, one {tablet} other {tablets}}",
-    "pcsName": "tablets"
+    "pcsName": "tablets",
+    "appl": "{amount} {count, plural, one {application} other {applications}}",
+    "applName": "applications"
   },
   "duration": {
     "hm": "{h} h {m} min",
@@ -23,9 +25,9 @@
     "laterToday": "Later today",
     "done": "Done",
     "asNeeded": "As needed",
-    "take": "Take",
-    "takeLate": "Take late anyway",
-    "takeNowEarly": "Take now (early)",
+    "take": "{form, select, cream {Apply} other {Take}}",
+    "takeLate": "{form, select, cream {Apply late anyway} other {Take late anyway}}",
+    "takeNowEarly": "{form, select, cream {Apply now (early)} other {Take now (early)}}",
     "skip": "Skip",
     "moreOptions": "Other amount, time or note…",
     "late": "{duration} late",
@@ -151,7 +153,8 @@
     "aroundTheClock": "Also at night",
     "aroundTheClockHint": "Doses may be at night: the usual day ({window}) is ignored for this medicine.",
     "drift": "Adjust the next dose when I'm late",
-    "driftHint": "Taken 2 h late? The next dose moves 1 h (in half hours), never past bedtime. Then the day is back on the clock."
+    "driftHint": "Taken 2 h late? The next dose moves 1 h (in half hours), never past bedtime. Then the day is back on the clock.",
+    "form_cream": "Cream / ointment"
   },
   "review": {
     "title": "Check your schedules",
@@ -196,10 +199,10 @@
   },
   "push": {
     "headsUp": "In {minutes} min: {doses}",
-    "due": "Time to take {doses}",
-    "nag": "Still not taken: {names} ({time})",
+    "due": "{verb, select, apply {Time to apply {doses}} other {Time to take {doses}}}",
+    "nag": "{verb, select, apply {Still not applied: {names} ({time})} other {Still not taken: {names} ({time})}}",
     "forOther": "{name}: {text}",
-    "actionTaken": "Taken",
+    "actionTaken": "{verb, select, apply {Applied} other {Taken}}",
     "actionSnooze": "Snooze 30 min",
     "test": "Test notification — reminders work on this device."
   },

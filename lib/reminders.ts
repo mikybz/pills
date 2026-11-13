@@ -116,7 +116,14 @@ export async function runReminders(from: number, to: number) {
           locale: u.locale,
           leadMin: u.remindLeadMin,
           person: m.person,
-          item: { medicineId: m.id, name: m.name, amount: doseAmountOf(m), unit: m.unit, slotAt: ev.slotAt },
+          item: {
+            medicineId: m.id,
+            name: m.name,
+            amount: doseAmountOf(m),
+            unit: m.unit,
+            form: m.form,
+            slotAt: ev.slotAt,
+          },
           ev,
         });
       }

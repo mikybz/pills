@@ -10,7 +10,9 @@
   },
   "units": {
     "pcs": "{amount} {count, plural, one {tablett} other {tabletter}}",
-    "pcsName": "tabletter"
+    "pcsName": "tabletter",
+    "appl": "{amount} {count, plural, one {påsmøring} other {påsmøringer}}",
+    "applName": "påsmøringer"
   },
   "duration": {
     "hm": "{h} t {m} min",
@@ -23,9 +25,9 @@
     "laterToday": "Senere i dag",
     "done": "Ferdig",
     "asNeeded": "Ved behov",
-    "take": "Ta",
-    "takeLate": "Ta likevel",
-    "takeNowEarly": "Ta nå (tidlig)",
+    "take": "{form, select, cream {Smør på} other {Ta}}",
+    "takeLate": "{form, select, cream {Smør på likevel} other {Ta likevel}}",
+    "takeNowEarly": "{form, select, cream {Smør på nå (tidlig)} other {Ta nå (tidlig)}}",
     "skip": "Hopp over",
     "moreOptions": "Annen mengde, tid eller notat …",
     "late": "{duration} for sent",
@@ -151,7 +153,8 @@
     "aroundTheClock": "Også om natten",
     "aroundTheClockHint": "Doser kan være om natten: den vanlige dagen ({window}) gjelder ikke for denne medisinen.",
     "drift": "Juster neste dose når jeg er sen",
-    "driftHint": "Tatt 2 t for sent? Neste dose flyttes 1 t (i halvtimer), aldri forbi leggetid. Så er dagen tilbake på klokka."
+    "driftHint": "Tatt 2 t for sent? Neste dose flyttes 1 t (i halvtimer), aldri forbi leggetid. Så er dagen tilbake på klokka.",
+    "form_cream": "Salve / krem"
   },
   "review": {
     "title": "Sjekk tidsplanene",
@@ -196,10 +199,10 @@
   },
   "push": {
     "headsUp": "Om {minutes} min: {doses}",
-    "due": "Tid for {doses}",
-    "nag": "Ikke tatt ennå: {names} ({time})",
+    "due": "{verb, select, apply {Smør på {doses}} other {Tid for {doses}}}",
+    "nag": "{verb, select, apply {Ikke smurt på ennå: {names} ({time})} other {Ikke tatt ennå: {names} ({time})}}",
     "forOther": "{name}: {text}",
-    "actionTaken": "Tatt",
+    "actionTaken": "{verb, select, apply {Smurt på} other {Tatt}}",
     "actionSnooze": "Utsett 30 min",
     "test": "Testvarsel — påminnelser virker på denne enheten."
   },

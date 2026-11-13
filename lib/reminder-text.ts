@@ -18,6 +18,8 @@ export interface ReminderItem {
   name: string;
   amount: number;
   unit: string;
+  /** Medicine form: creams are "applied", not "taken". */
+  form: string;
   slotAt: number;
 }
 
@@ -40,12 +42,13 @@ export function reminderPayload(args: {
   const doses = args.items.map((i) => `${i.name}, ${formatDose(i.amount, i.unit, t)}`).join("; ");
   const names = args.items.map((i) => i.name).join(", ");
   const time = formatTime(args.effectiveAt, locale, args.person.timezone);
+  const verb = args.items.every((i) => i.form === "cream") ? "apply" : "take";
   let text =
     args.kind === "headsUp"
       ? t("push.headsUp", { minutes: args.leadMin, doses })
       : args.kind === "due"
-        ? t("push.due", { doses })
-        : t("push.nag", { names, time });
+        ? t("push.due", { doses, verb })
+        : t("push.nag", { names, time, verb });
   if (args.forOther) text = t("push.forOther", { name: args.person.name, text: lowerFirst(text, locale) });
   return {
     title: t("app.name"),
@@ -53,7 +56,7 @@ export function reminderPayload(args: {
     tag: `${args.person.id}:${new Date(args.effectiveAt).toISOString()}`,
     renotify: true,
     actions: [
-      { action: "taken", title: t("push.actionTaken") },
+      { action: "taken", title: t("push.actionTaken", { verb }) },
       { action: "snooze", title: t("push.actionSnooze") },
     ],
     data: {
