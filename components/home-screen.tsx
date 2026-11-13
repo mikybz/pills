@@ -23,6 +23,7 @@ import { DAY, isFinished, type LogEntry } from "@/lib/schedule";
 import {
   currentScheduleFrom,
   doseAmountOf,
+  personDayOf,
   scheduleOf,
   toLogEntries,
   type DoseDTO,
@@ -83,7 +84,8 @@ export function HomeScreen() {
   const t = useTranslations();
   const { current, meId, reload: reloadPersons } = usePersons();
   const personId = current?.id;
-  const timeZone = current?.timezone ?? "Europe/Oslo";
+  const person = useMemo(() => personDayOf(current), [current]);
+  const timeZone = person.timezone;
   const now = useNow();
   const support = usePushSupport();
   const device = useDevicePush(support);
@@ -144,15 +146,15 @@ export function HomeScreen() {
 
   const { requestLog, dialog } = useDoseLogger({
     profile: ready?.profile ?? null,
-    timeZone,
+    person,
     logsFor,
     onLogged: (dose) => setData((d) => (d ? { ...d, doses: [dose, ...d.doses] } : d)),
     onUndone: (id) => setData((d) => (d ? { ...d, doses: d.doses.filter((x) => x.id !== id) } : d)),
   });
 
   const active = useMemo(
-    () => medicines.filter((m) => !m.archivedAt && !m.hidden && !isFinished(scheduleOf(m, timeZone), now)),
-    [medicines, timeZone, now],
+    () => medicines.filter((m) => !m.archivedAt && !m.hidden && !isFinished(scheduleOf(m, person), now)),
+    [medicines, person, now],
   );
 
   const checklist = useMemo(
@@ -160,7 +162,7 @@ export function HomeScreen() {
       buildChecklist(
         active.map((m) => ({
           id: m.id,
-          schedule: scheduleOf(m, timeZone),
+          schedule: scheduleOf(m, person),
           logs: logsFor(m.id),
           anchor: Date.parse(m.scheduleReviewedAt ?? m.createdAt),
           slotsFrom: m.scheduleChangedAt ? currentScheduleFrom(m) : null,
@@ -169,7 +171,7 @@ export function HomeScreen() {
         now,
         ready?.profile.remindLeadMin ?? 10,
       ),
-    [active, timeZone, logsFor, now, ready],
+    [active, person, logsFor, now, ready],
   );
 
   if (!ready || !current) {
@@ -241,7 +243,7 @@ export function HomeScreen() {
   const skip = (m: MedicineDTO, slotAt: number) =>
     requestLog(m, { amount: doseAmountOf(m), status: "skipped", slotAt });
 
-  const asNeeded = active.filter((m) => scheduleOf(m, timeZone).mode === "asNeeded");
+  const asNeeded = active.filter((m) => scheduleOf(m, person).mode === "asNeeded");
   const showPrompt =
     support === "supported" &&
     profile.remindersOn &&

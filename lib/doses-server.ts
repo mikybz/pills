@@ -2,9 +2,9 @@ import type { Medicine, User } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { assignSlot, DAY, fixedSlots, isScheduled, MIN } from "@/lib/schedule";
 import { checkDose } from "@/lib/safety";
-import { scheduleOf, toLogEntries } from "@/lib/types";
+import { scheduleOf, toLogEntries, type PersonDay } from "@/lib/types";
 
-type MedicineWithTz = Medicine & { person: { timezone: string } };
+type MedicineWithTz = Medicine & { person: PersonDay };
 
 /** Logs of a medicine around `at` (by taken time or slot), enough for slots and checks. */
 export async function logsAround(medicine: MedicineWithTz, at: number, excludeId?: string) {
@@ -38,7 +38,7 @@ export function resolveSlot(args: {
   rule?: "auto" | "window";
 }): number | null {
   const { medicine, user, logs, at, requested } = args;
-  const schedule = scheduleOf(medicine, medicine.person.timezone);
+  const schedule = scheduleOf(medicine, medicine.person);
   if (!isScheduled(schedule.mode)) return null;
   if (requested) {
     const t = requested.getTime();
@@ -61,7 +61,7 @@ export function checkFor(
   req: { amount: number; at: number; status: "taken" | "uncertain" | "skipped"; slotAt: number | null },
 ) {
   return checkDose({
-    schedule: scheduleOf(medicine, medicine.person.timezone),
+    schedule: scheduleOf(medicine, medicine.person),
     limits: {
       maxPerIntake: medicine.maxPerIntake,
       maxPerDay: medicine.maxPerDay,

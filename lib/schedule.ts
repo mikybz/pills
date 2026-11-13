@@ -16,6 +16,14 @@ export const DAY = 86_400_000;
 /** A log within this distance of "now" is a tap (tap rule); otherwise backdated (window rule). */
 export const TAP_TOLERANCE_MS = 2 * MIN;
 
+/** Usual awake hours, "HH:MM" wall clock in the schedule's time zone; may wrap midnight. */
+export interface DayWindow {
+  wake: string;
+  bed: string;
+}
+
+export const DEFAULT_DAY: DayWindow = { wake: "07:00", bed: "23:00" };
+
 export interface Schedule {
   mode: Mode;
   /** Fixed mode: sorted "HH:MM" wall-clock times in `timezone`. */
@@ -28,6 +36,10 @@ export interface Schedule {
   /** Doctor's minimum gap; overrides the default (half the gap to the next slot). */
   minIntervalMin: number | null;
   timezone: string;
+  /** The person's day window; null when the medicine is taken around the clock. */
+  day: DayWindow | null;
+  /** Late-dose drift (fixed mode): a late dose moves the next slot. */
+  drift: boolean;
 }
 
 export interface LogEntry {
@@ -489,4 +501,19 @@ export function sortTimes(times: string[]) {
 export function isNight(time: string) {
   const m = minutesOf(time);
   return m >= 23 * 60 || m < 6 * 60;
+}
+
+/* -------------------------------------------------------------- day window */
+
+/** Awake length in minutes: (bed − wake) mod 24 h. Both ends count as awake. */
+export function awakeMinutes(day: DayWindow) {
+  return (((minutesOf(day.bed) - minutesOf(day.wake)) % 1440) + 1440) % 1440;
+}
+
+/** A day window is valid when the awake part is between 6 h and 23 h. */
+export function validDayWindow(day: DayWindow) {
+  const ok = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!ok.test(day.wake) || !ok.test(day.bed)) return false;
+  const awake = awakeMinutes(day);
+  return awake >= 6 * 60 && awake <= 23 * 60;
 }

@@ -85,7 +85,7 @@ export async function runReminders(from: number, to: number) {
   const pending: Pending[] = [];
   const since = new Date(to - 3 * DAY);
   for (const m of medicines) {
-    const schedule = scheduleOf(m, m.person.timezone);
+    const schedule = scheduleOf(m, m.person);
     if (isFinished(schedule, to)) continue;
     const [doses, snoozeRows] = await Promise.all([
       prisma.doseLog.findMany({

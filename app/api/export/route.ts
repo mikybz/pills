@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       }
       // Missed slots are derived, not stored: add them as rows with status "missed".
       const dto = JSON.parse(JSON.stringify(m)) as MedicineDTO;
-      const slots = historySlots(segmentsOf(dto, person.timezone, now), toLogEntries(m.doses, m), 0, now, now);
+      const slots = historySlots(segmentsOf(dto, person, now), toLogEntries(m.doses, m), 0, now, now);
       for (const s of slots) {
         if (s.state !== "missed") continue;
         rows.push({

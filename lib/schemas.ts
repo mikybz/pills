@@ -1,21 +1,33 @@
 import { z } from "zod";
 import { isValidTimeZone } from "@/lib/tz";
+import { validDayWindow } from "@/lib/schedule";
 
 const timeZone = z.string().min(1).max(64).refine(isValidTimeZone, "invalid time zone");
 const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
+/** Partial update; the day window's length is checked on the merged result (`dayWindowProblem`). */
 export const personUpdateSchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   kind: z.enum(["person", "dog", "cat", "other"]).optional(),
   timezone: timeZone.optional(),
+  wakeTime: clock.optional(),
+  bedTime: clock.optional(),
 });
 
-export const personSchema = z.object({
-  name: z.string().trim().min(1).max(60),
-  kind: z.enum(["person", "dog", "cat", "other"]).default("person"),
-  timezone: timeZone.optional(),
-});
+export const personSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    kind: z.enum(["person", "dog", "cat", "other"]).default("person"),
+    timezone: timeZone.optional(),
+    wakeTime: clock.default("07:00"),
+    bedTime: clock.default("23:00"),
+  })
+  .refine((p) => validDayWindow({ wake: p.wakeTime, bed: p.bedTime }), "awake time must be 6–23 h");
+
+export function dayWindowProblem(p: { wakeTime: string; bedTime: string }): string | null {
+  return validDayWindow({ wake: p.wakeTime, bed: p.bedTime }) ? null : "awake time must be 6–23 h";
+}
 
 export const joinSchema = z.object({ code: z.string().min(4).max(40) });
 
@@ -47,6 +59,8 @@ export const medicineSchema = z.object({
   startsOn: localDate.nullable().optional(),
   endsOn: localDate.nullable().optional(),
   remindersEnabled: z.boolean().optional(),
+  aroundTheClock: z.boolean().optional(),
+  driftEnabled: z.boolean().optional(),
   notes: z.string().max(2000).nullable().optional(),
   sortOrder: z.number().int().optional(),
   hidden: z.boolean().optional(),

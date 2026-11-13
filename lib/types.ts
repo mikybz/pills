@@ -1,6 +1,6 @@
 import type { Medicine, DoseLog, User } from "@prisma/client";
 import type { CheckResult } from "@/lib/safety";
-import type { LogEntry, Mode, Schedule, Segment, DoseStatus } from "@/lib/schedule";
+import { DEFAULT_DAY, type DayWindow, type LogEntry, type Mode, type Schedule, type Segment, type DoseStatus } from "@/lib/schedule";
 
 /** A schedule that was in force before an edit (history only). */
 export interface ScheduleVersionDTO {
@@ -54,6 +54,9 @@ export interface PersonDTO {
   kind: string;
   /** IANA zone the fixed times are wall-clock times in. */
   timezone: string;
+  /** Usual awake hours ("HH:MM", wall clock in `timezone`); may wrap midnight. */
+  wakeTime: string;
+  bedTime: string;
   /** Whether the signed-in user gets reminders for this person. */
   reminders: boolean;
   /** The signed-in user's own person — can't be deleted. */
@@ -96,8 +99,34 @@ type ScheduleFields = Pick<
   "mode" | "times" | "intervalH" | "startsOn" | "endsOn" | "minIntervalMin"
 >;
 
-/** Medicine (or stored version) → pure Schedule. Unmigrated (null mode) behaves as needed. */
-export function scheduleOf(m: ScheduleFields, timezone: string): Schedule {
+/** What schedule math needs from a person: the time zone and the day window. */
+export interface PersonDay {
+  timezone: string;
+  wakeTime: string;
+  bedTime: string;
+}
+
+export const DEFAULT_PERSON_DAY: PersonDay = {
+  timezone: "Europe/Oslo",
+  wakeTime: DEFAULT_DAY.wake,
+  bedTime: DEFAULT_DAY.bed,
+};
+
+/** The person's day window (or the default one). */
+export function dayOf(p: Pick<PersonDay, "wakeTime" | "bedTime"> | null | undefined): DayWindow {
+  return { wake: p?.wakeTime ?? DEFAULT_DAY.wake, bed: p?.bedTime ?? DEFAULT_DAY.bed };
+}
+
+/** Person (or nothing yet) → PersonDay with defaults. */
+export function personDayOf(p: Partial<PersonDay> | null | undefined): PersonDay {
+  return {
+    timezone: p?.timezone ?? DEFAULT_PERSON_DAY.timezone,
+    wakeTime: p?.wakeTime ?? DEFAULT_PERSON_DAY.wakeTime,
+    bedTime: p?.bedTime ?? DEFAULT_PERSON_DAY.bedTime,
+  };
+}
+
+function baseSchedule(m: ScheduleFields, timezone: string): Omit<Schedule, "day" | "drift"> {
   const mode = (m.mode ?? "asNeeded") as Mode;
   return {
     mode: mode === "fixed" || mode === "interval" ? mode : "asNeeded",
@@ -108,6 +137,23 @@ export function scheduleOf(m: ScheduleFields, timezone: string): Schedule {
     minIntervalMin: m.minIntervalMin ?? null,
     timezone,
   };
+}
+
+/** Medicine → pure Schedule for its person. Unmigrated (null mode) behaves as needed. */
+export function scheduleOf(
+  m: ScheduleFields & Partial<Pick<MedicineDTO, "aroundTheClock" | "driftEnabled">>,
+  person: PersonDay,
+): Schedule {
+  return {
+    ...baseSchedule(m, person.timezone),
+    day: m.aroundTheClock ? null : dayOf(person),
+    drift: m.driftEnabled ?? true,
+  };
+}
+
+/** A stored ScheduleVersion → Schedule: no day window and no drift (as it behaved then). */
+export function versionScheduleOf(v: ScheduleVersionDTO): Schedule {
+  return { ...baseSchedule(v, v.timezone), day: null, drift: false };
 }
 
 /** Amount for one scheduled dose (or the default quick dose). */
@@ -147,18 +193,18 @@ export function toLogEntries(
 /** Schedule segments for history: stored versions plus the current schedule. */
 export function segmentsOf(
   m: MedicineDTO,
-  timezone: string,
+  person: PersonDay,
   until: number,
 ): Segment[] {
   const segs: Segment[] = (m.scheduleVersions ?? []).map((v) => ({
-    schedule: scheduleOf(v, v.timezone),
+    schedule: versionScheduleOf(v),
     from: Date.parse(v.validFrom),
     to: Date.parse(v.validTo),
   }));
   const from = currentScheduleFrom(m);
   if (from !== null) {
     const end = m.archivedAt ? Math.min(until, Date.parse(m.archivedAt)) : until;
-    segs.push({ schedule: scheduleOf(m, timezone), from, to: end });
+    segs.push({ schedule: scheduleOf(m, person), from, to: end });
   }
   return segs.filter((s) => s.to > s.from);
 }

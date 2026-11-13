@@ -18,6 +18,7 @@ import { zonedToUtc } from "./tz";
 const TZ = "Europe/Oslo";
 const at = (date: string, time: string) => zonedToUtc(date, time, TZ);
 
+const DAY_7_23 = { wake: "07:00", bed: "23:00" };
 const sched = (p: Partial<Schedule>): Schedule => ({
   mode: "fixed",
   times: [],
@@ -26,6 +27,8 @@ const sched = (p: Partial<Schedule>): Schedule => ({
   endsOn: null,
   minIntervalMin: null,
   timezone: TZ,
+  day: DAY_7_23,
+  drift: false,
   ...p,
 });
 const daily = sched({ times: ["08:00"] });

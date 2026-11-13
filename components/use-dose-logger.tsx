@@ -10,7 +10,14 @@ import { formatDose } from "@/lib/format";
 import { closeStaleNotifications } from "@/lib/push-client";
 import { checkDose, type CheckResult } from "@/lib/safety";
 import { assignSlot, isScheduled, type LogEntry } from "@/lib/schedule";
-import { scheduleOf, type DoseDTO, type LogResponse, type MedicineDTO, type ProfileDTO } from "@/lib/types";
+import {
+  scheduleOf,
+  type DoseDTO,
+  type LogResponse,
+  type MedicineDTO,
+  type PersonDay,
+  type ProfileDTO,
+} from "@/lib/types";
 
 interface Pending {
   medicine: MedicineDTO;
@@ -24,13 +31,14 @@ interface Pending {
  */
 export function useDoseLogger({
   profile,
-  timeZone,
+  person,
   logsFor,
   onLogged,
   onUndone,
 }: {
   profile: ProfileDTO | null;
-  timeZone: string;
+  /** The current person: time zone and day window. */
+  person: PersonDay;
   logsFor: (medicineId: string) => LogEntry[];
   onLogged: (dose: DoseDTO) => void;
   onUndone: (doseId: string) => void;
@@ -99,7 +107,7 @@ export function useDoseLogger({
         void persist(medicine, req);
         return;
       }
-      const schedule = scheduleOf(medicine, timeZone);
+      const schedule = scheduleOf(medicine, person);
       const logs = logsFor(medicine.id);
       const slotAt =
         req.slotAt !== undefined
@@ -124,14 +132,14 @@ export function useDoseLogger({
       if (check.level === "warn") setPending({ medicine, req, check });
       else void persist(medicine, req);
     },
-    [persist, timeZone, logsFor, profile],
+    [persist, person, logsFor, profile],
   );
 
   const dialog = pending ? (
     <WarningDialog
       check={pending.check}
       medicine={pending.medicine}
-      timeZone={timeZone}
+      timeZone={person.timezone}
       onConfirm={() => {
         void persist(pending.medicine, pending.req, true);
         setPending(null);

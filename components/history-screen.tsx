@@ -30,6 +30,7 @@ import { addDays, localDate, startOfLocalDay, weekdayMon0 } from "@/lib/tz";
 import {
   colorClasses,
   doseAmountOf,
+  personDayOf,
   segmentsOf,
   toLogEntries,
   type DoseDTO,
@@ -67,7 +68,8 @@ export function HistoryScreen() {
   const locale = useLocale();
   const { current, meId } = usePersons();
   const personId = current?.id;
-  const tz = current?.timezone ?? "Europe/Oslo";
+  const person = useMemo(() => personDayOf(current), [current]);
+  const tz = person.timezone;
   const now = useNow();
   const [range, setRange] = useState<Range>("week");
   const [medicineFilter, setMedicineFilter] = useState<string>("all");
@@ -133,11 +135,11 @@ export function HistoryScreen() {
   const slotsByMed = useMemo(() => {
     const map = new Map<string, HistorySlot[]>();
     for (const m of filtered) {
-      const slots = historySlots(segmentsOf(m, tz, now), logsFor(m.id), rangeStart, now, now);
+      const slots = historySlots(segmentsOf(m, person, now), logsFor(m.id), rangeStart, now, now);
       if (slots.length) map.set(m.id, slots);
     }
     return map;
-  }, [filtered, tz, now, logsFor, rangeStart]);
+  }, [filtered, person, now, logsFor, rangeStart]);
 
   const visibleDoses = useMemo(
     () =>
@@ -182,7 +184,7 @@ export function HistoryScreen() {
 
   const { requestLog, dialog } = useDoseLogger({
     profile: ready?.profile ?? null,
-    timeZone: tz,
+    person,
     logsFor,
     onLogged: reload,
     onUndone: reload,

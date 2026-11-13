@@ -33,7 +33,7 @@ import { api } from "@/lib/client";
 import { describeSchedule } from "@/lib/describe";
 import { usePushSupport } from "@/lib/push-client";
 import { isFinished } from "@/lib/schedule";
-import { colorClasses, MEDICINE_COLORS, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
+import { colorClasses, MEDICINE_COLORS, personDayOf, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +42,8 @@ export function SettingsScreen() {
   const locale = useLocale();
   const { current } = usePersons();
   const personId = current?.id;
-  const timeZone = current?.timezone ?? "Europe/Oslo";
+  const person = personDayOf(current);
+  const timeZone = person.timezone;
   const now = useNow();
   const support = usePushSupport();
   const [profile, setProfile] = useState<ProfileDTO | null>(null);
@@ -166,7 +167,7 @@ export function SettingsScreen() {
         <Card className="gap-0 p-0">
           <ul className="divide-y">
             {active.map((m, i) => {
-              const finished = isFinished(scheduleOf(m, timeZone), now);
+              const finished = isFinished(scheduleOf(m, person), now);
               return (
                 <li key={m.id} className={cn("flex items-center gap-1 py-3 pl-4 pr-2", m.hidden && "opacity-60")}>
                   <span className={cn("mr-1 size-3 shrink-0 rounded-full", (colorClasses[m.color] ?? colorClasses.blue).dot)} />

@@ -13,6 +13,8 @@ const asNeeded: Schedule = {
   endsOn: null,
   minIntervalMin: null,
   timezone: TZ,
+  day: { wake: "07:00", bed: "23:00" },
+  drift: true,
 };
 const dose = (takenAt: number, status: LogEntry["status"] = "taken", amount = 1): LogEntry => ({
   takenAt,
