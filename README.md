@@ -11,14 +11,18 @@ See [PLAN.md](PLAN.md) for the product design (scheduling model, dose check, rem
 ## Features
 
 - **Schedules** — once / twice / 3 / 4 times a day, every N hours (fixed times or counted
-  from the last dose), or as needed. Course length, 24-hour clock everywhere.
+  from the last dose), or as needed. Course length, 24-hour clock everywhere. Suggested
+  times stay inside each person's usual day (default 07:00–23:00); medicines can be marked
+  "also at night". Pills, creams and more (creams are *applied*).
 - **Today's checklist** — due now, missed, later today, done; as-needed cards with limits.
-  Late doses don't move the rest of the day.
+  A late dose moves only the next one a little (half an hour per hour late, never past
+  bedtime), then the day is back on the clock.
 - **Reminders** — web push: heads-up, at the time, repeats until logged; Taken / Snooze on
   the notification. Opt-in per person when tracking others; one dose stops it for everyone.
 - **Double-dose check** — one confirm sheet when a dose looks like a double; as-needed
   limits over a rolling 20 h window. Warns, never blocks.
-- **"Not sure I took it"**, backdated logging, skipped doses, notes, undo.
+- **"Not sure I took it"**, "Log an earlier dose" (a dose from yesterday never fills
+  today's), skipped doses, notes, undo.
 - **History** — adherence summary, missed doses, timelines, month calendar, export.
 - **People & pets** — track for others and share access.
 
@@ -40,7 +44,7 @@ Reminders locally: put a VAPID key pair (`npx web-push generate-vapid-keys`) and
 `VAPID_SUBJECT=mailto:you@example.com` in `.env.local`. Browsers allow push on
 `http://localhost`; on another host use `next dev --experimental-https`.
 
-Run the unit tests (schedule, dose check, migration guess):
+Run the unit tests (schedule, day window, drift, dose check, migration guess, reminder text):
 
 ```bash
 npx vitest run
