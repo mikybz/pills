@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AsNeededCard } from "@/components/as-needed-card";
 import { DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
+import { EarlierDoseButton } from "@/components/earlier-dose";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
 import { LogSheet } from "@/components/log-sheet";
 import { MedicineDialog } from "@/components/medicine-dialog";
@@ -144,7 +145,7 @@ export function HomeScreen() {
     ).catch(() => {});
   }, [ready, logsByMed]);
 
-  const { requestLog, dialog } = useDoseLogger({
+  const { requestLog, dialog, slotFor } = useDoseLogger({
     profile: ready?.profile ?? null,
     person,
     logsFor,
@@ -420,12 +421,18 @@ export function HomeScreen() {
         </section>
       )}
 
+      <EarlierDoseButton
+        medicines={active}
+        onPick={(m) => setSheet({ medicine: m, initialAt: Date.now() })}
+      />
+
       {sheet && (
         <LogSheet
           medicine={sheet.medicine}
           timeZone={timeZone}
           slotAt={sheet.slotAt}
           initialAt={sheet.initialAt}
+          countsAs={(at, n) => slotFor(sheet.medicine, at, sheet.slotAt, n)}
           onClose={() => setSheet(null)}
           onSubmit={(req) => {
             const m = sheet.medicine;

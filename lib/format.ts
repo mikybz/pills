@@ -1,6 +1,9 @@
 // Pure formatting helpers shared by client and server. 24-hour clock in every
 // locale (hourCycle "h23" is passed explicitly everywhere). Times are shown in the
 // person's timezone when one is given.
+import { addDays, localDate } from "./tz";
+
+type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 const tag = (locale: string) => (locale === "nb" ? "nb-NO" : "en-GB");
 
@@ -34,6 +37,25 @@ export function formatMonth(d: Date | number, locale: string, withYear: boolean,
   }).format(d);
 }
 
+/** "today" / "yesterday" / "on Wed 12 Nov": the local day of `at`, relative to `now`. */
+export function formatDayWord(at: number, now: number, locale: string, timeZone: string, t: Translate) {
+  const day = localDate(at, timeZone);
+  const today = localDate(now, timeZone);
+  if (day === today) return t("day.today");
+  if (day === addDays(today, -1)) return t("day.yesterday");
+  return t("day.on", { date: formatDay(at, locale, timeZone) });
+}
+
+/** "20:00" today, "yesterday 20:00", "Wed 12 Nov 20:00" otherwise. */
+export function formatWhen(at: number, now: number, locale: string, timeZone: string, t: Translate) {
+  const day = localDate(at, timeZone);
+  const today = localDate(now, timeZone);
+  const time = formatTime(at, locale, timeZone);
+  if (day === today) return time;
+  if (day === addDays(today, -1)) return t("day.yesterdayAt", { time });
+  return `${formatDay(at, locale, timeZone)} ${time}`;
+}
+
 /** "08:00 and 20:00" / "08:00 og 20:00". */
 export function formatList(items: string[], locale: string) {
   return new Intl.ListFormat(tag(locale), { style: "long", type: "conjunction" }).format(items);
@@ -53,8 +75,6 @@ export function formatRelative(d: Date | number, locale: string, now: number) {
 export function formatAmount(n: number) {
   return Number(n.toFixed(3)).toString();
 }
-
-type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 /** "1 tablet", "2 tablets", "5 mg". `t` is a translator rooted at the message catalog. */
 export function formatDose(amount: number, unit: string, t: Translate) {

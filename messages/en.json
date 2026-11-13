@@ -44,7 +44,10 @@
     "more": "More options",
     "noMedicines": "No medicines yet",
     "noMedicinesHint": "Add your first medicine in Settings to get today's list.",
-    "addMedicine": "Add medicine"
+    "addMedicine": "Add medicine",
+    "logEarlier": "Log an earlier dose",
+    "pickMedicine": "Which medicine?",
+    "loggedAt": "Logged: {name}, {when}"
   },
   "logSheet": {
     "title": "Log {name}",
@@ -60,7 +63,9 @@
     "statusSkipped": "Skipped on purpose",
     "note": "Note (optional)",
     "notePlaceholder": "e.g. headache, before travel",
-    "log": "Log dose"
+    "log": "Log dose",
+    "countsAs": "Counts as the {time} dose {day}",
+    "extraDose": "Extra dose. It doesn't count for any scheduled dose."
   },
   "warning": {
     "title": "Before you log {name}",
@@ -266,7 +271,7 @@
     "unsureTitle": "\"Did I take it?\"",
     "unsureBody": "Open the app: today's list shows it. If you truly don't remember, log with \"Not sure I took it\" from the ⋯ button. It fills the slot, so you won't be reminded again, and it's shown faded in history.",
     "backdateTitle": "Logging past doses",
-    "backdateBody": "Use the ⋯ button on a row to log a different amount, an earlier time or a note. In History, tap a missed dose and choose \"I took it\" to log it at the right time.",
+    "backdateBody": "Forgot to log a dose? Tap \"Log an earlier dose\" at the bottom of Today or History and pick the time; the sheet tells you which scheduled dose it counts as. A dose from yesterday never fills today's dose. The ⋯ button on a row logs that dose with a different amount, time or note. In History, tap a missed dose and choose \"I took it\" to log it at the right time.",
     "installTitle": "Install as an app",
     "installBody": "On iPhone: open in Safari → Share → \"Add to Home Screen\". On Android/Chrome: menu → \"Install app\". On desktop: the install icon in the address bar.",
     "disclaimerTitle": "Important",
@@ -338,5 +343,11 @@
     "joined": "You now track {name}",
     "medicinesFor": "Medicines for {name}",
     "loggedBy": "by {name}"
+  },
+  "day": {
+    "today": "today",
+    "yesterday": "yesterday",
+    "on": "on {date}",
+    "yesterdayAt": "yesterday {time}"
   }
 }

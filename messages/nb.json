@@ -44,7 +44,10 @@
     "more": "Flere valg",
     "noMedicines": "Ingen medisiner ennå",
     "noMedicinesHint": "Legg til den første medisinen under Innstillinger for å få dagens liste.",
-    "addMedicine": "Legg til medisin"
+    "addMedicine": "Legg til medisin",
+    "logEarlier": "Registrer en tidligere dose",
+    "pickMedicine": "Hvilken medisin?",
+    "loggedAt": "Registrert: {name}, {when}"
   },
   "logSheet": {
     "title": "Registrer {name}",
@@ -60,7 +63,9 @@
     "statusSkipped": "Hoppet over med vilje",
     "note": "Notat (valgfritt)",
     "notePlaceholder": "f.eks. hodepine, før reise",
-    "log": "Registrer dose"
+    "log": "Registrer dose",
+    "countsAs": "Teller som dosen kl. {time} {day}",
+    "extraDose": "Ekstra dose. Den teller ikke for noen planlagt dose."
   },
   "warning": {
     "title": "Før du registrerer {name}",
@@ -266,7 +271,7 @@
     "unsureTitle": "«Tok jeg den?»",
     "unsureBody": "Åpne appen: dagens liste viser det. Husker du virkelig ikke, registrer med «Usikker på om jeg tok den» fra ⋯-knappen. Da regnes dosen som tatt, så du ikke blir minnet på igjen, og den vises blek i historikken.",
     "backdateTitle": "Registrere tidligere doser",
-    "backdateBody": "Bruk ⋯-knappen på en rad for å registrere en annen mengde, et tidligere tidspunkt eller et notat. I Historikk kan du trykke på en glemt dose og velge «Jeg tok den» for å registrere den på riktig tid.",
+    "backdateBody": "Glemte du å registrere en dose? Trykk «Registrer en tidligere dose» nederst i I dag eller Historikk og velg tidspunkt; arket viser hvilken planlagt dose den teller som. En dose fra i går fyller aldri dagens dose. ⋯-knappen på en rad registrerer den dosen med en annen mengde, tid eller et notat. I Historikk kan du trykke på en glemt dose og velge «Jeg tok den» for å registrere den på riktig tid.",
     "installTitle": "Installer som app",
     "installBody": "På iPhone: åpne i Safari → Del → «Legg til på Hjem-skjerm». På Android/Chrome: meny → «Installer app». På PC/Mac: installasjonsikonet i adressefeltet.",
     "disclaimerTitle": "Viktig",
@@ -338,5 +343,11 @@
     "joined": "Du følger nå {name}",
     "medicinesFor": "Medisiner for {name}",
     "loggedBy": "av {name}"
+  },
+  "day": {
+    "today": "i dag",
+    "yesterday": "i går",
+    "on": "{date}",
+    "yesterdayAt": "i går {time}"
   }
 }

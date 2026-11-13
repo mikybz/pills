@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Minus, Plus } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateTimeField } from "@/components/time-field";
 import { doseAmountOf, parsePresets, type MedicineDTO } from "@/lib/types";
-import { formatAmount, unitLabel } from "@/lib/format";
-import { isScheduled, type DoseStatus } from "@/lib/schedule";
+import { formatAmount, formatDayWord, formatTime, unitLabel } from "@/lib/format";
+import { isScheduled, MIN, type DoseStatus } from "@/lib/schedule";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
 export interface LogRequest {
@@ -32,18 +33,24 @@ export function LogSheet({
   timeZone,
   slotAt,
   initialAt,
+  countsAs,
   onClose,
   onSubmit,
 }: {
   medicine: MedicineDTO;
   timeZone: string;
+  /** The row this sheet was opened from; undefined = no row ("Log an earlier dose"). */
   slotAt?: number;
-  /** Prefill "taken at" (e.g. the scheduled time from history). */
+  /** Prefill "taken at" and open the time field (e.g. the scheduled time from history). */
   initialAt?: number;
+  /** Which slot a log at `at` would answer (null = an extra dose), for the "Counts as" line. */
+  countsAs?: (at: number, now: number) => number | null;
   onClose: () => void;
   onSubmit: (req: LogRequest) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const now = useNow();
   const presets = isScheduled(medicine.mode) ? [doseAmountOf(medicine)] : parsePresets(medicine);
   const fallback = doseAmountOf(medicine);
   const [amount, setAmount] = useState(formatAmount(fallback));
@@ -69,6 +76,21 @@ export function LogSheet({
     { label: t("logSheet.statusUncertain"), value: "uncertain" },
     { label: t("logSheet.statusSkipped"), value: "skipped" },
   ];
+
+  // Live: which scheduled dose this log counts as, once the time isn't "now".
+  const chosenAt = offsetMin === "custom" ? Math.min(customAt ?? now, now) : now - offsetMin * MIN;
+  const countsLine =
+    countsAs && isScheduled(medicine.mode) && offsetMin !== 0 && status !== "skipped"
+      ? (() => {
+          const slot = countsAs(chosenAt, now);
+          return slot === null
+            ? t("logSheet.extraDose")
+            : t("logSheet.countsAs", {
+                time: formatTime(slot, locale, timeZone),
+                day: formatDayWord(slot, now, locale, timeZone, t),
+              });
+        })()
+      : null;
 
   function submit() {
     const now = Date.now();
@@ -151,8 +173,13 @@ export function LogSheet({
             </div>
             {offsetMin === "custom" && customAt !== null && (
               <div className="mt-2">
-                <DateTimeField value={customAt} onChange={setCustomAt} timeZone={timeZone} />
+                <DateTimeField value={customAt} onChange={setCustomAt} timeZone={timeZone} max={now} />
               </div>
+            )}
+            {countsLine && (
+              <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">
+                {countsLine}
+              </p>
             )}
           </div>
 
