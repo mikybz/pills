@@ -265,6 +265,20 @@ export function fixedSlots(
   return out;
 }
 
+/**
+ * After adding `log` (fixed mode): the next slot's new effective time when the
+ * log moved it (drift or push rule), else null. For "Next dose moved to 21:00".
+ */
+export function nextSlotChange(s: Schedule, logs: LogEntry[], log: LogEntry, now: number): number | null {
+  if (s.mode !== "fixed" || log.slotAt === null) return null;
+  const opts = { now, leadMin: 0, missedFrom: null };
+  const range = [log.slotAt, log.slotAt + 2 * DAY] as const;
+  const after = fixedSlots(s, [...logs, log], ...range, opts).find((sl) => sl.slotAt > log.slotAt!);
+  if (!after || after.log) return null;
+  const before = fixedSlots(s, logs, ...range, opts).find((sl) => sl.slotAt === after.slotAt);
+  return before && before.effectiveAt !== after.effectiveAt ? after.effectiveAt : null;
+}
+
 /* ----------------------------------------------------------- interval mode */
 
 /**

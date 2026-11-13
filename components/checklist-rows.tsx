@@ -49,7 +49,29 @@ function SlotTime({ slot, timeZone }: { slot: Slot; timeZone: string }) {
   );
 }
 
-function Name({ medicine, sub }: { medicine: MedicineDTO; sub?: React.ReactNode }) {
+/** Why a slot's time moved: "Moved 1 h because the last dose was late". */
+function MovedReason({ slot }: { slot: Slot }) {
+  const t = useTranslations();
+  if (!slot.moved) return null;
+  return (
+    <span className="block text-xs text-muted-foreground">
+      {slot.moved === "late"
+        ? t("home.movedLate", { by: formatDuration(slot.effectiveAt - slot.slotAt, t) })
+        : t("home.movedNight")}
+    </span>
+  );
+}
+
+function Name({
+  medicine,
+  sub,
+  slot,
+}: {
+  medicine: MedicineDTO;
+  sub?: React.ReactNode;
+  /** Shows the reason when the slot's time moved. */
+  slot?: Slot;
+}) {
   const t = useTranslations();
   const colors = colorClasses[medicine.color] ?? colorClasses.blue;
   return (
@@ -61,6 +83,7 @@ function Name({ medicine, sub }: { medicine: MedicineDTO; sub?: React.ReactNode 
           {formatDose(doseAmountOf(medicine), medicine.unit, t)}
           {sub && <> · {sub}</>}
         </span>
+        {slot && <MovedReason slot={slot} />}
       </span>
     </span>
   );
@@ -97,6 +120,7 @@ export function DueRow({
       <SlotTime slot={slot} timeZone={timeZone} />
       <Name
         medicine={medicine}
+        slot={slot}
         sub={
           late >= 60_000 ? (
             <span className="font-medium text-amber-700 dark:text-amber-400">
@@ -135,7 +159,7 @@ export function MissedRow({
     <li className="space-y-2 py-2.5 pl-4 pr-2">
       <div className="flex items-center gap-3">
         <SlotTime slot={slot} timeZone={timeZone} />
-        <Name medicine={medicine} sub={<span className="font-medium">{t("home.missedBadge")}</span>} />
+        <Name medicine={medicine} slot={slot} sub={<span className="font-medium">{t("home.missedBadge")}</span>} />
         <MoreButton onClick={onMore} />
       </div>
       <div className="flex gap-2 pl-15">
@@ -171,7 +195,7 @@ export function LaterRow({
       <DropdownMenu>
         <DropdownMenuTrigger className="flex w-full items-center gap-3 py-2.5 pl-4 pr-4 text-left hover:bg-accent/50">
           <SlotTime slot={slot} timeZone={timeZone} />
-          <Name medicine={medicine} />
+          <Name medicine={medicine} slot={slot} />
           <Ellipsis className="size-5 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">

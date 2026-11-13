@@ -47,7 +47,10 @@
     "addMedicine": "Add medicine",
     "logEarlier": "Log an earlier dose",
     "pickMedicine": "Which medicine?",
-    "loggedAt": "Logged: {name}, {when}"
+    "loggedAt": "Logged: {name}, {when}",
+    "movedLate": "Moved {by} because the last dose was late",
+    "movedNight": "Moved to the morning: it fell due at night",
+    "nextMoved": "Next dose moved to {time}"
   },
   "logSheet": {
     "title": "Log {name}",
@@ -100,7 +103,7 @@
     "everyLabel": "Every",
     "hours": "hours",
     "everyFixed": "At fixed times (recommended)",
-    "everyFixedHint": "Same clock times every day. A late dose doesn't move the rest of the day.",
+    "everyFixedHint": "Same clock times every day. A late dose moves at most the next one.",
     "everyFixedUneven": "Only when 24 can be divided by the hours (e.g. 6, 8, 12).",
     "everyInterval": "Count from when I last took it",
     "everyIntervalHint": "The next dose is due this many hours after the last one.",
@@ -268,7 +271,7 @@
     "checklistTitle": "Today's list",
     "checklistBody": "The home screen is a checklist for today. \"Due now\" shows what to take, oldest first — tap Take and it's logged. \"Later today\" shows what's coming; tap a row to take it early. \"Done\" shows what you logged today. A dose nobody logged in time moves to \"Missed\", where you can still take it late or mark it as skipped.",
     "lateTitle": "Late doses",
-    "lateBody": "Taking a dose late doesn't move the rest of your day: take the 08:00 dose at 10:00 and the evening dose is still at 20:00. A dose can be taken until halfway to the next one (for 08:00 and 20:00: until 14:00). Only if you take a dose very late is the next one pushed back, so the two aren't too close — that row shows the new time with the old one struck through.",
+    "lateBody": "A late dose doesn't throw off your day. Take the 08:00 dose at 10:00 and the next one moves a little: half an hour for every full hour late (here to 21:00), never past bedtime and never over the night. After that the times are back on the clock. If a dose is very late, the next one also waits long enough that the two aren't too close. A dose can be taken until halfway to the next one (for 08:00 and 20:00: until 14:00). A moved row shows the new time with the old one struck through. You can turn this off per medicine under More options → \"Adjust the next dose when I'm late\".",
     "doubleDoseTitle": "\"Log again?\"",
     "doubleDoseBody": "For scheduled medicines the app only checks for a likely double dose: the dose is already logged, or the last one was less than the minimum gap ago (by default half the time between two doses). It tells you when you took it and lets you log anyway or cancel. It never blocks you.",
     "asNeededTitle": "As-needed medicines",

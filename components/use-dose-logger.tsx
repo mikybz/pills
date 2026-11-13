@@ -6,10 +6,10 @@ import { toast } from "sonner";
 import { WarningDialog } from "@/components/warning-dialog";
 import type { LogRequest } from "@/components/log-sheet";
 import { api } from "@/lib/client";
-import { formatDose, formatWhen } from "@/lib/format";
+import { formatDose, formatTime, formatWhen } from "@/lib/format";
 import { closeStaleNotifications } from "@/lib/push-client";
 import { checkDose, type CheckResult } from "@/lib/safety";
-import { slotForLog, type LogEntry } from "@/lib/schedule";
+import { nextSlotChange, slotForLog, type DoseStatus, type LogEntry } from "@/lib/schedule";
 import { localDate } from "@/lib/tz";
 import {
   scheduleOf,
@@ -103,7 +103,22 @@ export function useDoseLogger({
                   when: formatWhen(req.takenAt, now, locale, person.timezone, t),
                 })
               : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
+        // Drift / push rule: say when this log moved the next dose.
+        const movedTo = nextSlotChange(
+          scheduleOf(medicine, person),
+          logsFor(medicine.id),
+          {
+            id: logged.id,
+            takenAt: Date.parse(logged.takenAt),
+            slotAt: logged.slotAt === null ? null : Date.parse(logged.slotAt),
+            status: logged.status as DoseStatus,
+            amount: logged.amount,
+          },
+          now,
+        );
         (serverWarning ? toast.warning : toast.success)(message, {
+          description:
+            movedTo !== null ? t("home.nextMoved", { time: formatTime(movedTo, locale, person.timezone) }) : undefined,
           duration: 8000,
           action: {
             label: t("home.undo"),

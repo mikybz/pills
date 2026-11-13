@@ -47,7 +47,10 @@
     "addMedicine": "Legg til medisin",
     "logEarlier": "Registrer en tidligere dose",
     "pickMedicine": "Hvilken medisin?",
-    "loggedAt": "Registrert: {name}, {when}"
+    "loggedAt": "Registrert: {name}, {when}",
+    "movedLate": "Flyttet {by} fordi forrige dose var sen",
+    "movedNight": "Flyttet til morgenen: den falt om natten",
+    "nextMoved": "Neste dose flyttet til {time}"
   },
   "logSheet": {
     "title": "Registrer {name}",
@@ -100,7 +103,7 @@
     "everyLabel": "Hver",
     "hours": "timer",
     "everyFixed": "Til faste klokkeslett (anbefalt)",
-    "everyFixedHint": "Samme klokkeslett hver dag. En sen dose flytter ikke resten av dagen.",
+    "everyFixedHint": "Samme klokkeslett hver dag. En sen dose flytter høyst den neste.",
     "everyFixedUneven": "Bare når 24 kan deles på antall timer (f.eks. 6, 8, 12).",
     "everyInterval": "Regn fra når jeg sist tok den",
     "everyIntervalHint": "Neste dose er så mange timer etter forrige.",
@@ -268,7 +271,7 @@
     "checklistTitle": "Dagens liste",
     "checklistBody": "Forsiden er en sjekkliste for i dag. «Nå» viser det du skal ta, eldste først — trykk Ta, så er det registrert. «Senere i dag» viser det som kommer; trykk på en rad for å ta den tidlig. «Ferdig» viser det du har registrert i dag. En dose som ingen registrerte i tide flyttes til «Glemt», der du fortsatt kan ta den sent eller markere den som hoppet over.",
     "lateTitle": "Sene doser",
-    "lateBody": "En sen dose flytter ikke resten av dagen: tar du 08:00-dosen kl. 10:00, er kveldsdosen fortsatt kl. 20:00. En dose kan tas frem til halvveis til neste (for 08:00 og 20:00: til 14:00). Bare hvis du tar en dose svært sent, skyves neste dose litt, så de ikke kommer for tett — den raden viser ny tid med den gamle overstreket.",
+    "lateBody": "En sen dose ødelegger ikke dagen. Tar du 08:00-dosen kl. 10:00, flyttes neste litt: en halvtime for hver hele time for sent (her til 21:00), aldri forbi leggetid og aldri over natten. Etter det er tidene tilbake på klokka. Er en dose svært sen, venter neste også lenge nok til at de ikke kommer for tett. En dose kan tas frem til halvveis til neste (for 08:00 og 20:00: til 14:00). En flyttet rad viser ny tid med den gamle overstreket. Du kan slå dette av per medisin under Flere valg → «Juster neste dose når jeg er sen».",
     "doubleDoseTitle": "«Før du registrerer»",
     "doubleDoseBody": "For medisiner med tidsplan sjekker appen bare om det ser ut som en dobbel dose: dosen er allerede registrert, eller forrige dose var for kort tid siden (standard: halve tiden mellom to doser). Den forteller når du tok den, og lar deg registrere likevel eller avbryte. Den stopper deg aldri.",
     "asNeededTitle": "Medisiner ved behov",

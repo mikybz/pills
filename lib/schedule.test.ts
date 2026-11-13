@@ -7,6 +7,7 @@ import {
   inSleep,
   intervalNextDue,
   intervalSlot,
+  nextSlotChange,
   reminderEvents,
   slotForLog,
   spreadTimes,
@@ -401,6 +402,14 @@ describe("required scenarios: day window and drift (PLAN.md §2.6)", () => {
       const slots = fixedSlots(allDay, logs, at("2026-01-15", "00:00"), at("2026-01-15", "23:59"), state(at("2026-01-15", "16:01")));
       expect(slots[1].effectiveAt).toBe(at("2026-01-16", "00:00"));
     });
+  });
+
+  it("the logged toast learns when a log moved the next slot", () => {
+    const morning = log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"));
+    expect(nextSlotChange(twice, [], morning, at("2026-01-15", "10:00"))).toBe(at("2026-01-15", "21:00"));
+    expect(nextSlotChange(twice, [], log(at("2026-01-15", "08:10"), at("2026-01-15", "08:00")), 0)).toBeNull();
+    expect(nextSlotChange({ ...twice, drift: false }, [], morning, 0)).toBeNull();
+    expect(nextSlotChange(twice, [], log(at("2026-01-15", "10:00"), null), 0)).toBeNull();
   });
 
   it("17. interval: a due time in the sleep window is effective at the next wake time", () => {
