@@ -28,7 +28,8 @@ import { formatAmount, formatDuration, formatList, unitLabel } from "@/lib/forma
 import {
   DEFAULT_TIMES,
   evenlySpaced,
-  isNight,
+  DEFAULT_DAY,
+  inSleep,
   minutesOf,
   sortTimes,
   timeOf,
@@ -180,7 +181,7 @@ export function MedicineDialog({
     setShiftBy(null);
   }
 
-  const nightTimes = isFixed ? sortTimes(s.times).filter(isNight) : [];
+  const nightTimes = isFixed ? sortTimes(s.times).filter((x) => inSleep(x, DEFAULT_DAY)) : [];
   const today = localDate(now, timeZone);
 
   async function save() {
