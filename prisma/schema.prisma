@@ -36,6 +36,9 @@ model Person {
   name         String
   kind         String         @default("person")
   timezone     String         @default("Europe/Oslo")
+  /// Day window ("HH:MM" wall clock in `timezone`); may wrap midnight.
+  wakeTime     String         @default("07:00")
+  bedTime      String         @default("23:00")
   selfOfUserId String?        @unique
   selfOf       User?          @relation("SelfPerson", fields: [selfOfUserId], references: [id], onDelete: Cascade)
   createdById  String
@@ -92,6 +95,10 @@ model Medicine {
   startsOn       String?
   endsOn         String?
   remindersEnabled Boolean @default(true)
+  /// Ignore the person's day window (night doses allowed, drift not capped at bedtime).
+  aroundTheClock Boolean   @default(false)
+  /// Late-dose drift: a late dose moves the next fixed slot (rounded, capped at bedtime).
+  driftEnabled   Boolean   @default(true)
   scheduleReviewedAt DateTime?
   scheduleChangedAt  DateTime?
   notes          String?

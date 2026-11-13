@@ -10,7 +10,9 @@
   },
   "units": {
     "pcs": "{amount} {count, plural, one {tablett} other {tabletter}}",
-    "pcsName": "tabletter"
+    "pcsName": "tabletter",
+    "appl": "{amount} {count, plural, one {påsmøring} other {påsmøringer}}",
+    "applName": "påsmøringer"
   },
   "duration": {
     "hm": "{h} t {m} min",
@@ -23,9 +25,9 @@
     "laterToday": "Senere i dag",
     "done": "Ferdig",
     "asNeeded": "Ved behov",
-    "take": "Ta",
-    "takeLate": "Ta likevel",
-    "takeNowEarly": "Ta nå (tidlig)",
+    "take": "{form, select, cream {Smør på} other {Ta}}",
+    "takeLate": "{form, select, cream {Smør på likevel} other {Ta likevel}}",
+    "takeNowEarly": "{form, select, cream {Smør på nå (tidlig)} other {Ta nå (tidlig)}}",
     "skip": "Hopp over",
     "moreOptions": "Annen mengde, tid eller notat …",
     "late": "{duration} for sent",
@@ -44,7 +46,13 @@
     "more": "Flere valg",
     "noMedicines": "Ingen medisiner ennå",
     "noMedicinesHint": "Legg til den første medisinen under Innstillinger for å få dagens liste.",
-    "addMedicine": "Legg til medisin"
+    "addMedicine": "Legg til medisin",
+    "logEarlier": "Registrer en tidligere dose",
+    "pickMedicine": "Hvilken medisin?",
+    "loggedAt": "Registrert: {name}, {when}",
+    "movedLate": "Flyttet {by} fordi forrige dose var sen",
+    "movedNight": "Flyttet til morgenen: den falt om natten",
+    "nextMoved": "Neste dose flyttet til {time}"
   },
   "logSheet": {
     "title": "Registrer {name}",
@@ -60,7 +68,9 @@
     "statusSkipped": "Hoppet over med vilje",
     "note": "Notat (valgfritt)",
     "notePlaceholder": "f.eks. hodepine, før reise",
-    "log": "Registrer dose"
+    "log": "Registrer dose",
+    "countsAs": "Teller som dosen kl. {time} {day}",
+    "extraDose": "Ekstra dose. Den teller ikke for noen planlagt dose."
   },
   "warning": {
     "title": "Før du registrerer {name}",
@@ -95,7 +105,7 @@
     "everyLabel": "Hver",
     "hours": "timer",
     "everyFixed": "Til faste klokkeslett (anbefalt)",
-    "everyFixedHint": "Samme klokkeslett hver dag. En sen dose flytter ikke resten av dagen.",
+    "everyFixedHint": "Samme klokkeslett hver dag. En sen dose flytter høyst den neste.",
     "everyFixedUneven": "Bare når 24 kan deles på antall timer (f.eks. 6, 8, 12).",
     "everyInterval": "Regn fra når jeg sist tok den",
     "everyIntervalHint": "Neste dose er så mange timer etter forrige.",
@@ -103,7 +113,7 @@
     "timeN": "Klokkeslett {n}",
     "shiftLater": "Flytt de andre tidene {by} senere også",
     "shiftEarlier": "Flytt de andre tidene {by} tidligere også",
-    "nightHint": "{count, plural, one {Én dose havner} other {# doser havner}} om natten ({times}).",
+    "nightHint": "{count, plural, one {Én dose havner} other {# doser havner}} om natten ({times}), utenfor dagen din ({window}).",
     "nightHintInterval": "Med dette intervallet kan noen doser havne om natten.",
     "dose": "Dose",
     "maxPerDay": "Maks per dag (valgfritt)",
@@ -136,7 +146,15 @@
     "notes": "Notater",
     "archive": "Arkiver",
     "archiveConfirm": "Arkivere denne medisinen? Historikken beholdes.",
-    "invalid": "Fyll inn navn og dose."
+    "invalid": "Fyll inn navn og dose.",
+    "moveIntoDay": "Flytt inn i dagen min",
+    "keepNightDoses": "Behold nattdoser",
+    "nightHintIntervalDay": "En dose som skal tas om natten (utenfor {window}), venter til du står opp. Slå på «Også om natten» for å ta den om natten.",
+    "aroundTheClock": "Også om natten",
+    "aroundTheClockHint": "Doser kan være om natten: den vanlige dagen ({window}) gjelder ikke for denne medisinen.",
+    "drift": "Juster neste dose når jeg er sen",
+    "driftHint": "Tatt 2 t for sent? Neste dose flyttes 1 t (i halvtimer), aldri forbi leggetid. Så er dagen tilbake på klokka.",
+    "form_cream": "Salve / krem"
   },
   "review": {
     "title": "Sjekk tidsplanene",
@@ -181,10 +199,10 @@
   },
   "push": {
     "headsUp": "Om {minutes} min: {doses}",
-    "due": "Tid for {doses}",
-    "nag": "Ikke tatt ennå: {names} ({time})",
+    "due": "{verb, select, apply {Smør på {doses}} other {Tid for {doses}}}",
+    "nag": "{verb, select, apply {Ikke smurt på ennå: {names} ({time})} other {Ikke tatt ennå: {names} ({time})}}",
     "forOther": "{name}: {text}",
-    "actionTaken": "Tatt",
+    "actionTaken": "{verb, select, apply {Smurt på} other {Tatt}}",
     "actionSnooze": "Utsett 30 min",
     "test": "Testvarsel — påminnelser virker på denne enheten."
   },
@@ -256,7 +274,7 @@
     "checklistTitle": "Dagens liste",
     "checklistBody": "Forsiden er en sjekkliste for i dag. «Nå» viser det du skal ta, eldste først — trykk Ta, så er det registrert. «Senere i dag» viser det som kommer; trykk på en rad for å ta den tidlig. «Ferdig» viser det du har registrert i dag. En dose som ingen registrerte i tide flyttes til «Glemt», der du fortsatt kan ta den sent eller markere den som hoppet over.",
     "lateTitle": "Sene doser",
-    "lateBody": "En sen dose flytter ikke resten av dagen: tar du 08:00-dosen kl. 10:00, er kveldsdosen fortsatt kl. 20:00. En dose kan tas frem til halvveis til neste (for 08:00 og 20:00: til 14:00). Bare hvis du tar en dose svært sent, skyves neste dose litt, så de ikke kommer for tett — den raden viser ny tid med den gamle overstreket.",
+    "lateBody": "En sen dose ødelegger ikke dagen. Tar du 08:00-dosen kl. 10:00, flyttes neste litt: en halvtime for hver hele time for sent (her til 21:00), aldri forbi leggetid og aldri over natten. Etter det er tidene tilbake på klokka. Er en dose svært sen, venter neste også lenge nok til at de ikke kommer for tett. En dose kan tas frem til halvveis til neste (for 08:00 og 20:00: til 14:00). En flyttet rad viser ny tid med den gamle overstreket. Du kan slå dette av per medisin under Flere valg → «Juster neste dose når jeg er sen».",
     "doubleDoseTitle": "«Før du registrerer»",
     "doubleDoseBody": "For medisiner med tidsplan sjekker appen bare om det ser ut som en dobbel dose: dosen er allerede registrert, eller forrige dose var for kort tid siden (standard: halve tiden mellom to doser). Den forteller når du tok den, og lar deg registrere likevel eller avbryte. Den stopper deg aldri.",
     "asNeededTitle": "Medisiner ved behov",
@@ -266,7 +284,7 @@
     "unsureTitle": "«Tok jeg den?»",
     "unsureBody": "Åpne appen: dagens liste viser det. Husker du virkelig ikke, registrer med «Usikker på om jeg tok den» fra ⋯-knappen. Da regnes dosen som tatt, så du ikke blir minnet på igjen, og den vises blek i historikken.",
     "backdateTitle": "Registrere tidligere doser",
-    "backdateBody": "Bruk ⋯-knappen på en rad for å registrere en annen mengde, et tidligere tidspunkt eller et notat. I Historikk kan du trykke på en glemt dose og velge «Jeg tok den» for å registrere den på riktig tid.",
+    "backdateBody": "Glemte du å registrere en dose? Trykk «Registrer en tidligere dose» nederst i I dag eller Historikk og velg tidspunkt; arket viser hvilken planlagt dose den teller som. En dose fra i går fyller aldri dagens dose. ⋯-knappen på en rad registrerer den dosen med en annen mengde, tid eller et notat. I Historikk kan du trykke på en glemt dose og velge «Jeg tok den» for å registrere den på riktig tid.",
     "installTitle": "Installer som app",
     "installBody": "På iPhone: åpne i Safari → Del → «Legg til på Hjem-skjerm». På Android/Chrome: meny → «Installer app». På PC/Mac: installasjonsikonet i adressefeltet.",
     "disclaimerTitle": "Viktig",
@@ -337,6 +355,31 @@
     "invalidCode": "Koden er ugyldig, allerede brukt eller utløpt.",
     "joined": "Du følger nå {name}",
     "medicinesFor": "Medisiner for {name}",
-    "loggedBy": "av {name}"
+    "loggedBy": "av {name}",
+    "awake": "Vanlig dag",
+    "awakeFrom": "Vanligvis våken fra",
+    "awakeTo": "til",
+    "wakeTime": "Står opp",
+    "bedTime": "Leggetid",
+    "awakeHint": "Foreslåtte dosetider holder seg innenfor dette tidsrommet, og en sen dose flytter aldri neste forbi leggetid.",
+    "awakeInvalid": "Våken tid må være mellom 6 og 23 timer.",
+    "dayRow": "Dag: {window}"
+  },
+  "day": {
+    "today": "i dag",
+    "yesterday": "i går",
+    "on": "{date}",
+    "yesterdayAt": "i går {time}"
+  },
+  "night": {
+    "banner": "Noen doser er om natten, utenfor {window}.",
+    "review": "Se over",
+    "title": "Doser om natten",
+    "intro": "Disse medisinene har doser utenfor den vanlige dagen ({window}). Velg hva du vil gjøre med hver; ingenting endres før du bruker valgene.",
+    "move": "Flytt",
+    "keep": "Behold om natten",
+    "leave": "La være nå",
+    "apply": "Bruk",
+    "applied": "Tidsplanene er oppdatert"
   }
 }

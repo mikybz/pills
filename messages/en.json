@@ -10,7 +10,9 @@
   },
   "units": {
     "pcs": "{amount} {count, plural, one {tablet} other {tablets}}",
-    "pcsName": "tablets"
+    "pcsName": "tablets",
+    "appl": "{amount} {count, plural, one {application} other {applications}}",
+    "applName": "applications"
   },
   "duration": {
     "hm": "{h} h {m} min",
@@ -23,9 +25,9 @@
     "laterToday": "Later today",
     "done": "Done",
     "asNeeded": "As needed",
-    "take": "Take",
-    "takeLate": "Take late anyway",
-    "takeNowEarly": "Take now (early)",
+    "take": "{form, select, cream {Apply} other {Take}}",
+    "takeLate": "{form, select, cream {Apply late anyway} other {Take late anyway}}",
+    "takeNowEarly": "{form, select, cream {Apply now (early)} other {Take now (early)}}",
     "skip": "Skip",
     "moreOptions": "Other amount, time or note…",
     "late": "{duration} late",
@@ -44,7 +46,13 @@
     "more": "More options",
     "noMedicines": "No medicines yet",
     "noMedicinesHint": "Add your first medicine in Settings to get today's list.",
-    "addMedicine": "Add medicine"
+    "addMedicine": "Add medicine",
+    "logEarlier": "Log an earlier dose",
+    "pickMedicine": "Which medicine?",
+    "loggedAt": "Logged: {name}, {when}",
+    "movedLate": "Moved {by} because the last dose was late",
+    "movedNight": "Moved to the morning: it fell due at night",
+    "nextMoved": "Next dose moved to {time}"
   },
   "logSheet": {
     "title": "Log {name}",
@@ -60,7 +68,9 @@
     "statusSkipped": "Skipped on purpose",
     "note": "Note (optional)",
     "notePlaceholder": "e.g. headache, before travel",
-    "log": "Log dose"
+    "log": "Log dose",
+    "countsAs": "Counts as the {time} dose {day}",
+    "extraDose": "Extra dose. It doesn't count for any scheduled dose."
   },
   "warning": {
     "title": "Before you log {name}",
@@ -95,7 +105,7 @@
     "everyLabel": "Every",
     "hours": "hours",
     "everyFixed": "At fixed times (recommended)",
-    "everyFixedHint": "Same clock times every day. A late dose doesn't move the rest of the day.",
+    "everyFixedHint": "Same clock times every day. A late dose moves at most the next one.",
     "everyFixedUneven": "Only when 24 can be divided by the hours (e.g. 6, 8, 12).",
     "everyInterval": "Count from when I last took it",
     "everyIntervalHint": "The next dose is due this many hours after the last one.",
@@ -103,7 +113,7 @@
     "timeN": "Time {n}",
     "shiftLater": "Move the other times {by} later too",
     "shiftEarlier": "Move the other times {by} earlier too",
-    "nightHint": "{count, plural, one {One dose lands} other {# doses land}} at night ({times}).",
+    "nightHint": "{count, plural, one {One dose lands} other {# doses land}} at night ({times}), outside your day ({window}).",
     "nightHintInterval": "With this interval, some doses can land at night.",
     "dose": "Dose",
     "maxPerDay": "Max per day (optional)",
@@ -136,7 +146,15 @@
     "notes": "Notes",
     "archive": "Archive",
     "archiveConfirm": "Archive this medicine? Its history is kept.",
-    "invalid": "Please fill in a name and a dose."
+    "invalid": "Please fill in a name and a dose.",
+    "moveIntoDay": "Move into my day",
+    "keepNightDoses": "Keep night doses",
+    "nightHintIntervalDay": "A dose that falls due at night (outside {window}) waits until you wake up. Turn on \"Also at night\" to take it at night.",
+    "aroundTheClock": "Also at night",
+    "aroundTheClockHint": "Doses may be at night: the usual day ({window}) is ignored for this medicine.",
+    "drift": "Adjust the next dose when I'm late",
+    "driftHint": "Taken 2 h late? The next dose moves 1 h (in half hours), never past bedtime. Then the day is back on the clock.",
+    "form_cream": "Cream / ointment"
   },
   "review": {
     "title": "Check your schedules",
@@ -181,10 +199,10 @@
   },
   "push": {
     "headsUp": "In {minutes} min: {doses}",
-    "due": "Time to take {doses}",
-    "nag": "Still not taken: {names} ({time})",
+    "due": "{verb, select, apply {Time to apply {doses}} other {Time to take {doses}}}",
+    "nag": "{verb, select, apply {Still not applied: {names} ({time})} other {Still not taken: {names} ({time})}}",
     "forOther": "{name}: {text}",
-    "actionTaken": "Taken",
+    "actionTaken": "{verb, select, apply {Applied} other {Taken}}",
     "actionSnooze": "Snooze 30 min",
     "test": "Test notification — reminders work on this device."
   },
@@ -256,7 +274,7 @@
     "checklistTitle": "Today's list",
     "checklistBody": "The home screen is a checklist for today. \"Due now\" shows what to take, oldest first — tap Take and it's logged. \"Later today\" shows what's coming; tap a row to take it early. \"Done\" shows what you logged today. A dose nobody logged in time moves to \"Missed\", where you can still take it late or mark it as skipped.",
     "lateTitle": "Late doses",
-    "lateBody": "Taking a dose late doesn't move the rest of your day: take the 08:00 dose at 10:00 and the evening dose is still at 20:00. A dose can be taken until halfway to the next one (for 08:00 and 20:00: until 14:00). Only if you take a dose very late is the next one pushed back, so the two aren't too close — that row shows the new time with the old one struck through.",
+    "lateBody": "A late dose doesn't throw off your day. Take the 08:00 dose at 10:00 and the next one moves a little: half an hour for every full hour late (here to 21:00), never past bedtime and never over the night. After that the times are back on the clock. If a dose is very late, the next one also waits long enough that the two aren't too close. A dose can be taken until halfway to the next one (for 08:00 and 20:00: until 14:00). A moved row shows the new time with the old one struck through. You can turn this off per medicine under More options → \"Adjust the next dose when I'm late\".",
     "doubleDoseTitle": "\"Log again?\"",
     "doubleDoseBody": "For scheduled medicines the app only checks for a likely double dose: the dose is already logged, or the last one was less than the minimum gap ago (by default half the time between two doses). It tells you when you took it and lets you log anyway or cancel. It never blocks you.",
     "asNeededTitle": "As-needed medicines",
@@ -266,7 +284,7 @@
     "unsureTitle": "\"Did I take it?\"",
     "unsureBody": "Open the app: today's list shows it. If you truly don't remember, log with \"Not sure I took it\" from the ⋯ button. It fills the slot, so you won't be reminded again, and it's shown faded in history.",
     "backdateTitle": "Logging past doses",
-    "backdateBody": "Use the ⋯ button on a row to log a different amount, an earlier time or a note. In History, tap a missed dose and choose \"I took it\" to log it at the right time.",
+    "backdateBody": "Forgot to log a dose? Tap \"Log an earlier dose\" at the bottom of Today or History and pick the time; the sheet tells you which scheduled dose it counts as. A dose from yesterday never fills today's dose. The ⋯ button on a row logs that dose with a different amount, time or note. In History, tap a missed dose and choose \"I took it\" to log it at the right time.",
     "installTitle": "Install as an app",
     "installBody": "On iPhone: open in Safari → Share → \"Add to Home Screen\". On Android/Chrome: menu → \"Install app\". On desktop: the install icon in the address bar.",
     "disclaimerTitle": "Important",
@@ -337,6 +355,31 @@
     "invalidCode": "That code is invalid, already used or expired.",
     "joined": "You now track {name}",
     "medicinesFor": "Medicines for {name}",
-    "loggedBy": "by {name}"
+    "loggedBy": "by {name}",
+    "awake": "Usual day",
+    "awakeFrom": "Usually awake from",
+    "awakeTo": "to",
+    "wakeTime": "Wake time",
+    "bedTime": "Bedtime",
+    "awakeHint": "Suggested dose times stay inside this window, and a late dose never moves the next one past bedtime.",
+    "awakeInvalid": "The awake part must be between 6 and 23 hours.",
+    "dayRow": "Day: {window}"
+  },
+  "day": {
+    "today": "today",
+    "yesterday": "yesterday",
+    "on": "on {date}",
+    "yesterdayAt": "yesterday {time}"
+  },
+  "night": {
+    "banner": "Some doses are at night, outside {window}.",
+    "review": "Review",
+    "title": "Doses at night",
+    "intro": "These medicines have doses outside the usual day ({window}). Choose what to do with each; nothing changes until you apply.",
+    "move": "Move",
+    "keep": "Keep at night",
+    "leave": "Leave for now",
+    "apply": "Apply",
+    "applied": "Schedules updated"
   }
 }

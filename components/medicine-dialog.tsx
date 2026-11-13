@@ -28,10 +28,13 @@ import { formatAmount, formatDuration, formatList, unitLabel } from "@/lib/forma
 import {
   DEFAULT_TIMES,
   evenlySpaced,
-  isNight,
+  fitTimes,
+  inSleep,
   minutesOf,
   sortTimes,
+  spreadTimes,
   timeOf,
+  type DayWindow,
 } from "@/lib/schedule";
 import { addDays, daysBetween, localDate } from "@/lib/tz";
 import {
@@ -45,8 +48,8 @@ import {
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
-const FORMS = ["pill", "tablet", "capsule", "spray", "drops", "injection", "liquid", "other"] as const;
-const UNITS = ["pcs", "mg", "µg", "g", "ml", "IU", "puffs"];
+const FORMS = ["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"] as const;
+const UNITS = ["pcs", "appl", "mg", "µg", "g", "ml", "IU", "puffs"];
 
 type Freq = "1" | "2" | "3" | "4" | "everyN" | "asNeeded";
 type Course = "none" | "days" | "date";
@@ -54,7 +57,7 @@ type Course = "none" | "days" | "date";
 const num = (s: string) => Number(s.replace(",", "."));
 const optNum = (s: string) => (s.trim() === "" ? null : num(s));
 
-function initialState(m: MedicineDTO | null, defaultColor: string) {
+function initialState(m: MedicineDTO | null, defaultColor: string, day: DayWindow) {
   const times = sortTimes(parseTimes(m?.times));
   let freq: Freq = "1";
   let everyH = "8";
@@ -77,7 +80,7 @@ function initialState(m: MedicineDTO | null, defaultColor: string) {
     freq,
     everyH,
     everyKind,
-    times: times.length ? times : DEFAULT_TIMES[1],
+    times: times.length ? times : spreadTimes(1, day),
     dose: formatAmount(m ? doseAmountOf(m) : 1),
     unit: m?.unit ?? "pcs",
     maxPerDay: m?.maxPerDay ? formatAmount(m.maxPerDay) : "",
@@ -89,6 +92,8 @@ function initialState(m: MedicineDTO | null, defaultColor: string) {
     startsOn: m?.startsOn ?? null,
     endsOn: m?.endsOn ?? "",
     remindersEnabled: m?.remindersEnabled ?? true,
+    aroundTheClock: m?.aroundTheClock ?? false,
+    driftEnabled: m?.driftEnabled ?? true,
     form: m?.form ?? "pill",
     color: m?.color ?? defaultColor,
     notes: m?.notes ?? "",
@@ -103,6 +108,7 @@ export function MedicineDialog({
   medicine,
   personId,
   timeZone,
+  day,
   showReminderSwitch,
   defaultColor = "blue",
   onClose,
@@ -112,6 +118,8 @@ export function MedicineDialog({
   /** Person a new medicine is created for. */
   personId?: string;
   timeZone: string;
+  /** The person's day window: suggested times stay inside it. */
+  day: DayWindow;
   /** Hidden on devices that cannot show notifications (no dead settings). */
   showReminderSwitch: boolean;
   /** Color for a new medicine (the first one not used yet). */
@@ -122,7 +130,7 @@ export function MedicineDialog({
   const t = useTranslations();
   const locale = useLocale();
   const now = useNow();
-  const [s, setS] = useState(() => initialState(medicine, defaultColor));
+  const [s, setS] = useState(() => initialState(medicine, defaultColor, day));
   const [more, setMore] = useState(false);
   const [shiftBy, setShiftBy] = useState<number | null>(null);
   const set = <K extends keyof typeof s>(k: K, v: (typeof s)[K]) => setS((p) => ({ ...p, [k]: v }));
@@ -143,7 +151,10 @@ export function MedicineDialog({
     setShiftBy(null);
     setS((p) => {
       const next = { ...p, freq: f };
-      if (["1", "2", "3", "4"].includes(f)) next.times = DEFAULT_TIMES[Number(f)];
+      if (["1", "2", "3", "4"].includes(f)) {
+        // Inside the person's day, unless the medicine is taken around the clock.
+        next.times = p.aroundTheClock ? DEFAULT_TIMES[Number(f)] : spreadTimes(Number(f), day);
+      }
       if (f === "everyN") {
         const h = num(p.everyH);
         next.everyKind = Number.isInteger(24 / h) ? p.everyKind : "interval";
@@ -174,13 +185,34 @@ export function MedicineDialog({
     });
   }
 
+  /** Creams are counted in applications: switch pcs ↔ appl along with the form. */
+  function chooseForm(form: string) {
+    setS((p) => ({
+      ...p,
+      form,
+      unit:
+        form === "cream" && p.unit === "pcs" ? "appl" : form !== "cream" && p.unit === "appl" ? "pcs" : p.unit,
+    }));
+  }
+
   function shiftOthers() {
     if (shiftBy === null) return;
     setS((p) => ({ ...p, times: p.times.map((x, i) => (i === 0 ? x : timeOf(minutesOf(x) + shiftBy))) }));
     setShiftBy(null);
   }
 
-  const nightTimes = isFixed ? sortTimes(s.times).filter(isNight) : [];
+  const nightTimes = isFixed && !s.aroundTheClock ? sortTimes(s.times).filter((x) => inSleep(x, day)) : [];
+  const windowText = `${day.wake}–${day.bed}`;
+
+  function moveIntoDay() {
+    setShiftBy(null);
+    setS((p) => ({ ...p, times: fitTimes(p.times, day) ?? p.times }));
+  }
+
+  function keepNightDoses() {
+    set("aroundTheClock", true);
+    setMore(true);
+  }
   const today = localDate(now, timeZone);
 
   async function save() {
@@ -215,6 +247,8 @@ export function MedicineDialog({
       startsOn,
       endsOn,
       remindersEnabled: s.remindersEnabled,
+      aroundTheClock: s.aroundTheClock,
+      driftEnabled: s.driftEnabled,
       minIntervalMin: minGap && minGap > 0 ? Math.round(minGap * 60) : null,
       confirmSchedule: true,
     };
@@ -375,15 +409,31 @@ export function MedicineDialog({
           )}
 
           {nightTimes.length > 0 && (
-            <p className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-sm">
-              <Moon className="mt-0.5 size-4 shrink-0" />
-              {t("medicine.nightHint", { count: nightTimes.length, times: formatList(nightTimes, locale) })}
-            </p>
+            <div className="space-y-2 rounded-lg bg-muted px-3 py-2 text-sm">
+              <p className="flex items-start gap-2">
+                <Moon className="mt-0.5 size-4 shrink-0" />
+                {t("medicine.nightHint", {
+                  count: nightTimes.length,
+                  times: formatList(nightTimes, locale),
+                  window: windowText,
+                })}
+              </p>
+              <div className="flex flex-wrap gap-2 pl-6">
+                <Button type="button" size="sm" variant="outline" onClick={moveIntoDay}>
+                  {t("medicine.moveIntoDay")}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={keepNightDoses}>
+                  {t("medicine.keepNightDoses")}
+                </Button>
+              </div>
+            </div>
           )}
           {isInterval && hours < 12 && (
             <p className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-sm">
               <Moon className="mt-0.5 size-4 shrink-0" />
-              {t("medicine.nightHintInterval")}
+              {s.aroundTheClock
+                ? t("medicine.nightHintInterval")
+                : t("medicine.nightHintIntervalDay", { window: windowText })}
             </p>
           )}
 
@@ -485,6 +535,28 @@ export function MedicineDialog({
               )}
 
               {!isAsNeeded && (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label>{t("medicine.aroundTheClock")}</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t("medicine.aroundTheClockHint", { window: windowText })}
+                    </p>
+                  </div>
+                  <Switch checked={s.aroundTheClock} onCheckedChange={(v) => set("aroundTheClock", v)} />
+                </div>
+              )}
+
+              {isFixed && (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label>{t("medicine.drift")}</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{t("medicine.driftHint")}</p>
+                  </div>
+                  <Switch checked={s.driftEnabled} onCheckedChange={(v) => set("driftEnabled", v)} />
+                </div>
+              )}
+
+              {!isAsNeeded && (
                 <div>
                   <Label className="mb-1.5 block">{t("medicine.minGap")}</Label>
                   <div className="flex items-center gap-2">
@@ -544,7 +616,7 @@ export function MedicineDialog({
 
               <div>
                 <Label className="mb-1.5 block">{t("medicine.form")}</Label>
-                <Select value={s.form} onValueChange={(v) => v && set("form", v)}>
+                <Select value={s.form} onValueChange={(v) => v && chooseForm(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue>{(v: string) => t(`medicine.form_${v}`)}</SelectValue>
                   </SelectTrigger>

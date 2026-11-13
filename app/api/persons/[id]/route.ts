@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
-import { personUpdateSchema } from "@/lib/schemas";
+import { dayWindowProblem, personUpdateSchema } from "@/lib/schemas";
 import { getPersonWithAccess, hasPersonAccess, toPersonDTO } from "@/lib/persons";
 
 type Params = { params: Promise<{ id: string }> };
@@ -13,6 +13,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!(await hasPersonAccess(user.id, id))) return notFound();
     const parsed = personUpdateSchema.safeParse(await req.json());
     if (!parsed.success) return badRequest(parsed.error.message);
+    if (parsed.data.wakeTime || parsed.data.bedTime) {
+      const existing = await prisma.person.findUnique({ where: { id } });
+      if (!existing) return notFound();
+      const problem = dayWindowProblem({
+        wakeTime: parsed.data.wakeTime ?? existing.wakeTime,
+        bedTime: parsed.data.bedTime ?? existing.bedTime,
+      });
+      if (problem) return badRequest(problem);
+    }
     await prisma.person.update({ where: { id }, data: parsed.data });
     const person = await getPersonWithAccess(id);
     return NextResponse.json(toPersonDTO(user, person!));

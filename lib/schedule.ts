@@ -2,9 +2,9 @@
  * Pure scheduling model (no I/O, no clock). Used by the client (checklist,
  * history), the API (assigning `slotAt` on write) and the reminder tick.
  *
- * Instants are epoch milliseconds. See REWRITE.md section 3 for the rules.
+ * Instants are epoch milliseconds. See PLAN.md §2 for the rules.
  */
-import { addDays, localDate, startOfLocalDay, zonedToUtc } from "./tz";
+import { addDays, localDate, localTime, startOfLocalDay, zonedToUtc } from "./tz";
 
 export type Mode = "fixed" | "interval" | "asNeeded";
 export type DoseStatus = "taken" | "uncertain" | "skipped";
@@ -15,6 +15,14 @@ export const DAY = 86_400_000;
 
 /** A log within this distance of "now" is a tap (tap rule); otherwise backdated (window rule). */
 export const TAP_TOLERANCE_MS = 2 * MIN;
+
+/** Usual awake hours, "HH:MM" wall clock in the schedule's time zone; may wrap midnight. */
+export interface DayWindow {
+  wake: string;
+  bed: string;
+}
+
+export const DEFAULT_DAY: DayWindow = { wake: "07:00", bed: "23:00" };
 
 export interface Schedule {
   mode: Mode;
@@ -28,6 +36,10 @@ export interface Schedule {
   /** Doctor's minimum gap; overrides the default (half the gap to the next slot). */
   minIntervalMin: number | null;
   timezone: string;
+  /** The person's day window; null when the medicine is taken around the clock. */
+  day: DayWindow | null;
+  /** Late-dose drift (fixed mode): a late dose moves the next slot. */
+  drift: boolean;
 }
 
 export interface LogEntry {
@@ -57,8 +69,10 @@ export type SlotState =
 export interface Slot {
   /** Nominal scheduled instant — the identity stored in `DoseLog.slotAt`. */
   slotAt: number;
-  /** After the push rule; equals slotAt unless the previous dose came late. */
+  /** After drift and the push rule (fixed) or the night shift (interval); else slotAt. */
   effectiveAt: number;
+  /** Why effectiveAt differs: the previous dose was late, or the due time fell at night. */
+  moved: "late" | "night" | null;
   /** Past this instant an unlogged slot is missed. Infinity in interval mode. */
   cutoff: number;
   /** Logs at or after this instant (and before `cutoff`) belong to this slot. */
@@ -177,10 +191,45 @@ function stateOf(
   return missedFrom !== null && slot.slotAt >= missedFrom ? "missed" : "lapsed";
 }
 
+/* ------------------------------------------------------------ late drift */
+
+/** The first wake time strictly after `at`. */
+function nextWakeAfter(at: number, day: DayWindow, tz: string): number {
+  const date = localDate(at, tz);
+  const same = zonedToUtc(date, day.wake, tz);
+  return same > at ? same : zonedToUtc(addDays(date, 1), day.wake, tz);
+}
+
+/** The first bed time at or after `at` (the end of the awake period `at` is in). */
+function bedAtOrAfter(at: number, day: DayWindow, tz: string): number {
+  const date = localDate(at, tz);
+  const same = zonedToUtc(date, day.bed, tz);
+  return same >= at ? same : zonedToUtc(addDays(date, 1), day.bed, tz);
+}
+
 /**
- * Fixed-mode slots with slotAt in [from, to], filled from the logs, with the
- * push rule applied: a dose taken at t moves the *next* slot to
- * max(nextSlotAt, t + minGap). Only that one slot moves.
+ * Late-dose drift for the slot after one filled at `takenAt` (PLAN.md §2.2):
+ * floor(delay / 1 h) × 30 min, where delay is measured against the previous
+ * slot's nominal time; none below 1 h. Never across the night (a wake time
+ * between the two slots, or the slot itself in the sleep window) and never
+ * past that day's bedtime. Around the clock (no day window): not capped.
+ */
+export function driftMs(s: Schedule, prevSlotAt: number, slotAt: number, takenAt: number): number {
+  if (!s.drift) return 0;
+  const delay = takenAt - prevSlotAt;
+  if (delay < HOUR) return 0;
+  const drift = Math.floor(delay / HOUR) * 30 * MIN;
+  if (!s.day) return drift;
+  if (inSleep(localTime(slotAt, s.timezone), s.day)) return 0;
+  if (nextWakeAfter(prevSlotAt, s.day, s.timezone) <= slotAt) return 0;
+  return Math.min(drift, bedAtOrAfter(slotAt, s.day, s.timezone) - slotAt);
+}
+
+/**
+ * Fixed-mode slots with slotAt in [from, to], filled from the logs. A dose
+ * taken (or uncertain) at t moves only the *next* slot, to
+ * max(nextSlotAt + drift, t + minGap): late-dose drift, with the push rule as
+ * the safety floor. Skipped doses move nothing.
  */
 export function fixedSlots(
   s: Schedule,
@@ -198,12 +247,14 @@ export function fixedSlots(
     const prev = frames[i - 1];
     const prevLog = prev && prev.nextAt === f.slotAt ? fill.get(prev.slotAt) : undefined;
     if (prevLog && isTakenStatus(prevLog.status)) {
-      effectiveAt = Math.max(f.slotAt, prevLog.takenAt + prev.minGap);
+      const drifted = f.slotAt + driftMs(s, prev.slotAt, f.slotAt, prevLog.takenAt);
+      effectiveAt = Math.max(drifted, prevLog.takenAt + prev.minGap);
     }
     if (f.slotAt < from || f.slotAt > to) continue;
     const base = {
       slotAt: f.slotAt,
       effectiveAt,
+      moved: effectiveAt !== f.slotAt ? ("late" as const) : null,
       cutoff: Math.max(f.cutoff, effectiveAt),
       windowStart: f.windowStart,
       minGap: f.minGap,
@@ -212,6 +263,20 @@ export function fixedSlots(
     out.push({ ...base, state: stateOf(base, opts) });
   }
   return out;
+}
+
+/**
+ * After adding `log` (fixed mode): the next slot's new effective time when the
+ * log moved it (drift or push rule), else null. For "Next dose moved to 21:00".
+ */
+export function nextSlotChange(s: Schedule, logs: LogEntry[], log: LogEntry, now: number): number | null {
+  if (s.mode !== "fixed" || log.slotAt === null) return null;
+  const opts = { now, leadMin: 0, missedFrom: null };
+  const range = [log.slotAt, log.slotAt + 2 * DAY] as const;
+  const after = fixedSlots(s, [...logs, log], ...range, opts).find((sl) => sl.slotAt > log.slotAt!);
+  if (!after || after.log) return null;
+  const before = fixedSlots(s, logs, ...range, opts).find((sl) => sl.slotAt === after.slotAt);
+  return before && before.effectiveAt !== after.effectiveAt ? after.effectiveAt : null;
 }
 
 /* ----------------------------------------------------------- interval mode */
@@ -245,7 +310,11 @@ export function intervalMinGap(s: Schedule) {
   return s.minIntervalMin ? s.minIntervalMin * MIN : ((s.intervalH ?? 0) * HOUR) / 2;
 }
 
-/** The one pending interval slot (never missed: overdue until logged). */
+/**
+ * The one pending interval slot (never missed: overdue until logged). A due
+ * time in the sleep window keeps its slotAt but is effective at the next wake
+ * time (not for medicines taken around the clock).
+ */
 export function intervalSlot(
   s: Schedule,
   logs: LogEntry[],
@@ -254,9 +323,11 @@ export function intervalSlot(
 ): Slot | null {
   const next = intervalNextDue(s, logs, anchor);
   if (next === null) return null;
+  const night = !!s.day && inSleep(localTime(next, s.timezone), s.day);
   const base = {
     slotAt: next,
-    effectiveAt: next,
+    effectiveAt: night ? nextWakeAfter(next, s.day!, s.timezone) : next,
+    moved: night ? ("night" as const) : null,
     cutoff: Infinity,
     windowStart: -Infinity,
     minGap: intervalMinGap(s),
@@ -317,6 +388,46 @@ export function assignSlot(
     return prev && !prev.log ? prev.slotAt : null;
   }
   return w.slotAt;
+}
+
+/**
+ * The slot a log answers, with or without a row (PLAN.md §1.2). Used by the
+ * client for the check and by the server on every write.
+ * - No row: `assignSlot` (rule `auto`, or `opts.rule`).
+ * - A row keeps its slot for a tap (at ≈ now, e.g. "Take now (early)") and for
+ *   any time from the slot's windowStart on — unless that time is on an
+ *   earlier local day than the slot. Otherwise the window rule decides, which
+ *   may give an earlier slot or none: a dose backdated to yesterday from
+ *   today's row never fills today's slot.
+ * - Exception: an earlier time on the row's own day whose window slot is
+ *   already taken stays an early dose for the row ("−15 min" on tonight's row).
+ * - A row that is not a real slot (stale client) is ignored.
+ */
+export function slotForLog(
+  s: Schedule,
+  logs: LogEntry[],
+  rowSlotAt: number | undefined,
+  at: number,
+  now: number,
+  opts: { leadMin: number; anchor: number; rule?: "auto" | "window" },
+): number | null {
+  if (!isScheduled(s.mode)) return null;
+  const auto = () => assignSlot(s, logs, at, now, opts);
+  if (rowSlotAt === undefined) return auto();
+  if (s.mode === "interval") return rowSlotAt;
+  const stateOpts = { now, leadMin: opts.leadMin, missedFrom: null };
+  const row = fixedSlots(s, logs, rowSlotAt - MIN, rowSlotAt + MIN, stateOpts).find(
+    (sl) => sl.slotAt === rowSlotAt,
+  );
+  if (!row) return auto();
+  if (Math.abs(now - at) <= TAP_TOLERANCE_MS) return rowSlotAt;
+  const earlierDay = at < rowSlotAt && localDate(at, s.timezone) < localDate(rowSlotAt, s.timezone);
+  if (at >= row.windowStart && !earlierDay) return rowSlotAt;
+  const w = assignSlot(s, logs, at, now, { ...opts, rule: "window" });
+  if (w !== null && w !== rowSlotAt && !earlierDay && rowSlotAt > at && !row.log) {
+    if (logs.some((l) => l.slotAt === w && isTakenStatus(l.status))) return rowSlotAt;
+  }
+  return w;
 }
 
 /* ---------------------------------------------------------------- reminders */
@@ -443,6 +554,7 @@ export function historySlots(
         out.push({
           slotAt: l.slotAt,
           effectiveAt: l.slotAt,
+          moved: null,
           cutoff: Infinity,
           windowStart: -Infinity,
           minGap: intervalMinGap(seg.schedule),
@@ -485,8 +597,67 @@ export function sortTimes(times: string[]) {
   return [...new Set(times)].sort();
 }
 
-/** 23:00–06:00 counts as night (for the plain hint in the form). */
-export function isNight(time: string) {
-  const m = minutesOf(time);
-  return m >= 23 * 60 || m < 6 * 60;
+
+/* -------------------------------------------------------------- day window */
+
+/** Awake length in minutes: (bed − wake) mod 24 h. Both ends count as awake. */
+export function awakeMinutes(day: DayWindow) {
+  return (((minutesOf(day.bed) - minutesOf(day.wake)) % 1440) + 1440) % 1440;
+}
+
+/** A day window is valid when the awake part is between 6 h and 23 h. */
+export function validDayWindow(day: DayWindow) {
+  const ok = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!ok.test(day.wake) || !ok.test(day.bed)) return false;
+  const awake = awakeMinutes(day);
+  return awake >= 6 * 60 && awake <= 23 * 60;
+}
+
+/** True when `time` is outside the awake window (both ends are awake). No window ⇒ never. */
+export function inSleep(time: string, day: DayWindow | null): boolean {
+  if (!day) return false;
+  const off = (((minutesOf(time) - minutesOf(day.wake)) % 1440) + 1440) % 1440;
+  return off > awakeMinutes(day);
+}
+
+/**
+ * Suggested times for "N times a day" inside the day window, wake-first:
+ * spaced 24 h / N apart with the first dose up to 1 h after waking when that
+ * fits, else evenly from wake to bed. Rounded to the nearest 30 min, never
+ * outside the window.
+ */
+export function spreadTimes(count: number, day: DayWindow): string[] {
+  const n = Math.max(1, Math.round(count));
+  const awake = awakeMinutes(day);
+  const step = 1440 / n;
+  const slack = awake - (n - 1) * step;
+  const offsets = Array.from({ length: n }, (_, i) =>
+    slack >= 0 ? Math.min(60, slack / 2) + i * step : (i * awake) / (n - 1),
+  );
+  const wake = minutesOf(day.wake);
+  return offsets.map((o) => {
+    let r = Math.round((wake + o) / 30) * 30 - wake;
+    if (r < 0) r += 30;
+    if (r > awake) r -= 30;
+    if (r < 0 || r > awake) r = o;
+    return timeOf(wake + r);
+  });
+}
+
+/**
+ * Proposal for a schedule with a time in the sleep window: the whole schedule
+ * shifted by the smallest amount that puts every time inside the window (later
+ * wins a tie), else re-spread with `spreadTimes`. Sorted. Null when nothing
+ * needs to move (or there is no window).
+ */
+export function fitTimes(times: string[], day: DayWindow | null): string[] | null {
+  if (!day || !times.length || !times.some((t) => inSleep(t, day))) return null;
+  const mins = times.map(minutesOf);
+  for (let d = 1; d <= 720; d++) {
+    for (const shift of [d, -d]) {
+      const moved = mins.map((m) => timeOf(m + shift));
+      if (moved.every((t) => !inSleep(t, day))) return sortTimes(moved);
+    }
+  }
+  return sortTimes(spreadTimes(times.length, day));
 }

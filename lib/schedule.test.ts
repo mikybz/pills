@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   assignSlot,
+  fitTimes,
   fixedSlots,
   historySlots,
+  inSleep,
   intervalNextDue,
   intervalSlot,
+  nextSlotChange,
   reminderEvents,
+  slotForLog,
+  spreadTimes,
+  validDayWindow,
   SNOOZE_SEQ_BASE,
   HOUR,
   MIN,
@@ -18,6 +24,7 @@ import { zonedToUtc } from "./tz";
 const TZ = "Europe/Oslo";
 const at = (date: string, time: string) => zonedToUtc(date, time, TZ);
 
+const DAY_7_23 = { wake: "07:00", bed: "23:00" };
 const sched = (p: Partial<Schedule>): Schedule => ({
   mode: "fixed",
   times: [],
@@ -26,6 +33,8 @@ const sched = (p: Partial<Schedule>): Schedule => ({
   endsOn: null,
   minIntervalMin: null,
   timezone: TZ,
+  day: DAY_7_23,
+  drift: true,
   ...p,
 });
 const daily = sched({ times: ["08:00"] });
@@ -58,7 +67,7 @@ function slotsOn(s: Schedule, logs: LogEntry[], date: string, now: number) {
   return fixedSlots(s, logs, at(date, "00:00"), at(date, "23:59"), state(now));
 }
 
-describe("required scenarios (REWRITE.md §7)", () => {
+describe("required scenarios (PLAN.md §2.6)", () => {
   it("1. once daily 08:00: taking it at 08:00 warns neither on the first day nor after", () => {
     const d1 = logDose(daily, [], at("2026-01-15", "08:00"));
     expect(d1.slotAt).toBe(at("2026-01-15", "08:00"));
@@ -98,11 +107,15 @@ describe("required scenarios (REWRITE.md §7)", () => {
     expect(today[0].log).toBeNull();
   });
 
-  it("4. 08:00 + 20:00: taken at 10:00, the next slot stays 20:00", () => {
+  it("4. 08:00 + 20:00: taken at 10:00, the next slot drifts to 21:00 (stays 20:00 without drift)", () => {
     const logs = [log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"))];
     const [, evening] = slotsOn(twice, logs, "2026-01-15", at("2026-01-15", "10:05"));
     expect(evening.slotAt).toBe(at("2026-01-15", "20:00"));
-    expect(evening.effectiveAt).toBe(at("2026-01-15", "20:00"));
+    expect(evening.effectiveAt).toBe(at("2026-01-15", "21:00"));
+    expect(evening.moved).toBe("late");
+    const [, plain] = slotsOn({ ...twice, drift: false }, logs, "2026-01-15", at("2026-01-15", "10:05"));
+    expect(plain.effectiveAt).toBe(at("2026-01-15", "20:00"));
+    expect(plain.moved).toBeNull();
   });
 
   it("5. 08:00 + 20:00: the morning slot is overdue at 13:59 and missed at 14:00", () => {
@@ -110,16 +123,25 @@ describe("required scenarios (REWRITE.md §7)", () => {
     expect(slotsOn(twice, [], "2026-01-15", at("2026-01-15", "14:00"))[0].state).toBe("missed");
   });
 
-  it("6. 08:00 + 20:00: a missed morning dose taken at 16:00 pushes the next to 22:00, then back on the clock", () => {
+  it("6. 08:00 + 20:00: a missed morning dose taken at 16:00 moves the next to 23:00 (22:00 without drift), then back on the clock", () => {
     const logs = [log(at("2026-01-15", "16:00"), at("2026-01-15", "08:00"))];
-    const slots = fixedSlots(twice, logs, at("2026-01-15", "00:00"), at("2026-01-16", "23:59"), state(at("2026-01-15", "16:01")));
+    const range = [at("2026-01-15", "00:00"), at("2026-01-16", "23:59")] as const;
+    const slots = fixedSlots(twice, logs, ...range, state(at("2026-01-15", "16:01")));
+    // Drift 4 h (8 h late) capped at bedtime 23:00; the push rule alone gives 22:00.
     expect(slots.map((s) => s.effectiveAt)).toEqual([
+      at("2026-01-15", "08:00"),
+      at("2026-01-15", "23:00"),
+      at("2026-01-16", "08:00"),
+      at("2026-01-16", "20:00"),
+    ]);
+    expect(slots[1].slotAt).toBe(at("2026-01-15", "20:00"));
+    const plain = fixedSlots({ ...twice, drift: false }, logs, ...range, state(at("2026-01-15", "16:01")));
+    expect(plain.map((s) => s.effectiveAt)).toEqual([
       at("2026-01-15", "08:00"),
       at("2026-01-15", "22:00"),
       at("2026-01-16", "08:00"),
       at("2026-01-16", "20:00"),
     ]);
-    expect(slots[1].slotAt).toBe(at("2026-01-15", "20:00"));
   });
 
   it("7. a second tap on a slot that is already logged warns", () => {
@@ -213,9 +235,9 @@ describe("required scenarios (REWRITE.md §7)", () => {
     });
 
     it("a pushed slot uses the effective time", () => {
-      // 08:00 missed, taken late at 16:00 → 20:00 slot moves to 22:00.
+      // Without drift: 08:00 missed, taken late at 16:00 → 20:00 slot pushed to 22:00.
       const logs = [log(at("2026-01-15", "16:00"), slot)];
-      const ev = reminderEvents({ ...base, schedule: twice, logs, from: at("2026-01-15", "16:00"), to: day.to });
+      const ev = reminderEvents({ ...base, schedule: { ...twice, drift: false }, logs, from: at("2026-01-15", "16:00"), to: day.to });
       const due = ev.find((e) => e.kind === "due")!;
       expect(due.slotAt).toBe(at("2026-01-15", "20:00"));
       expect(due.at).toBe(at("2026-01-15", "22:00"));
@@ -245,6 +267,204 @@ describe("required scenarios (REWRITE.md §7)", () => {
       const ev = reminderEvents({ ...base, settings: { leadMin: 0, nagEveryMin: 0, nagMaxMin: 120 }, logs: [], ...day });
       expect(ev.map((e) => e.kind)).toEqual(["due"]);
     });
+  });
+});
+
+describe("required scenarios: day window and drift (PLAN.md §2.6)", () => {
+  const opts = { leadMin: 10, anchor: 0 };
+
+  it("13. a row log backdated to before the slot's window answers the earlier slot (or none); today's slot stays open", () => {
+    const now = at("2026-01-16", "09:00");
+    const morning = log(at("2026-01-16", "08:00"), at("2026-01-16", "08:00"));
+    const tonight = at("2026-01-16", "20:00");
+    // From today's 20:00 row, the forgotten dose was taken yesterday at 21:00.
+    const backdated = at("2026-01-15", "21:00");
+    expect(slotForLog(twice, [morning], tonight, backdated, now, opts)).toBe(at("2026-01-15", "20:00"));
+    const after = [morning, log(backdated, at("2026-01-15", "20:00"))];
+    const evening = slotsOn(twice, after, "2026-01-16", now)[1];
+    expect(evening.slotAt).toBe(tonight);
+    expect(evening.log).toBeNull();
+
+    // Once daily: yesterday 21:00 is inside today's 08:00 window, but on an earlier
+    // day: it answers yesterday's open slot, or none when that one is taken.
+    const today8 = at("2026-01-16", "08:00");
+    expect(slotForLog(daily, [], today8, backdated, now, opts)).toBe(at("2026-01-15", "08:00"));
+    const yesterdayTaken = [log(at("2026-01-15", "08:00"), at("2026-01-15", "08:00"))];
+    expect(slotForLog(daily, yesterdayTaken, today8, backdated, now, opts)).toBeNull();
+
+    // The row keeps its slot from its window start on, for taps, and for an early
+    // dose on the same day when the earlier slot is already taken.
+    expect(slotForLog(twice, [morning], tonight, at("2026-01-16", "14:00"), at("2026-01-16", "15:00"), opts)).toBe(tonight);
+    expect(slotForLog(twice, [morning], tonight, now, now, opts)).toBe(tonight);
+    expect(slotForLog(twice, [morning], tonight, at("2026-01-16", "08:45"), now, opts)).toBe(tonight);
+    // A late dose from a missed row stays on that row.
+    const missed8 = at("2026-01-16", "08:00");
+    expect(slotForLog(twice, [], missed8, at("2026-01-16", "16:00"), at("2026-01-16", "16:30"), opts)).toBe(missed8);
+    // No row: the plain assignment; a stale (unreal) row is ignored.
+    expect(slotForLog(twice, [], undefined, backdated, now, opts)).toBe(at("2026-01-15", "20:00"));
+    expect(slotForLog(twice, [], at("2026-01-16", "12:00"), backdated, now, opts)).toBe(at("2026-01-15", "20:00"));
+  });
+
+  it("14. spreadTimes for 1–6 doses: 07–23, a short window and a wrapping window", () => {
+    const spread = (day: { wake: string; bed: string }) => [1, 2, 3, 4, 5, 6].map((n) => spreadTimes(n, day));
+    expect(spread(DAY_7_23)).toEqual([
+      ["08:00"],
+      ["08:00", "20:00"],
+      ["07:00", "15:00", "23:00"],
+      ["07:00", "12:30", "17:30", "23:00"],
+      ["07:00", "11:00", "15:00", "19:00", "23:00"],
+      ["07:00", "10:00", "13:30", "16:30", "20:00", "23:00"],
+    ]);
+    expect(spread({ wake: "09:00", bed: "21:00" })).toEqual([
+      ["10:00"],
+      ["09:00", "21:00"],
+      ["09:00", "15:00", "21:00"],
+      ["09:00", "13:00", "17:00", "21:00"],
+      ["09:00", "12:00", "15:00", "18:00", "21:00"],
+      ["09:00", "11:30", "14:00", "16:00", "18:30", "21:00"],
+    ]);
+    expect(spread({ wake: "15:00", bed: "07:00" })).toEqual([
+      ["16:00"],
+      ["16:00", "04:00"],
+      ["15:00", "23:00", "07:00"],
+      ["15:00", "20:30", "01:30", "07:00"],
+      ["15:00", "19:00", "23:00", "03:00", "07:00"],
+      ["15:00", "18:00", "21:30", "00:30", "04:00", "07:00"],
+    ]);
+    // Rounding never leaves the window.
+    expect(spreadTimes(4, { wake: "07:15", bed: "22:45" })).toEqual(["07:30", "12:30", "17:30", "22:30"]);
+  });
+
+  it("15. fitTimes: shift, single time, re-spread, nothing to do", () => {
+    expect(fitTimes(["06:00", "18:00"], DAY_7_23)).toEqual(["07:00", "19:00"]);
+    expect(fitTimes(["23:30"], DAY_7_23)).toEqual(["23:00"]);
+    expect(fitTimes(["06:00", "12:00", "18:00", "00:00"], DAY_7_23)).toEqual(["07:00", "12:30", "17:30", "23:00"]);
+    expect(fitTimes(["08:00", "20:00"], DAY_7_23)).toBeNull();
+    expect(fitTimes(["02:00"], null)).toBeNull();
+  });
+
+  describe("16. late-dose drift", () => {
+    const four = sched({ times: ["08:00", "13:00", "18:00", "23:00"] });
+    const on = (s: Schedule, logs: LogEntry[], date = "2026-01-15") => slotsOn(s, logs, date, at(date, "23:59"));
+    const eveningAfter = (time: string, s: Schedule = twice) =>
+      on(s, [log(at("2026-01-15", time), at("2026-01-15", "08:00"))])[1].effectiveAt;
+
+    it("starts at 1 h late and rounds down to half hours", () => {
+      expect(eveningAfter("08:59")).toBe(at("2026-01-15", "20:00"));
+      expect(eveningAfter("09:00")).toBe(at("2026-01-15", "20:30"));
+      expect(eveningAfter("10:00")).toBe(at("2026-01-15", "21:00"));
+      expect(eveningAfter("11:20")).toBe(at("2026-01-15", "21:30"));
+    });
+
+    it("cascades back to the clock (drift measured against the nominal time)", () => {
+      const first = [log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"))];
+      expect(on(four, first)[1].effectiveAt).toBe(at("2026-01-15", "14:00"));
+      const second = [...first, log(at("2026-01-15", "14:00"), at("2026-01-15", "13:00"))];
+      expect(on(four, second)[2].effectiveAt).toBe(at("2026-01-15", "18:30"));
+      const third = [...second, log(at("2026-01-15", "18:30"), at("2026-01-15", "18:00"))];
+      expect(on(four, third)[3].effectiveAt).toBe(at("2026-01-15", "23:00"));
+      expect(on(four, third)[3].moved).toBeNull();
+    });
+
+    it("is capped at bedtime; a bedtime dose never moves", () => {
+      expect(eveningAfter("14:00")).toBe(at("2026-01-15", "23:00"));
+      const late = [log(at("2026-01-15", "22:00"), at("2026-01-15", "18:00"))];
+      // 18:00 taken 4 h late: drift 2 h capped at 23:00 → no drift, push rule floor 22:00 + 2.5 h.
+      expect(on(four, late)[3].effectiveAt).toBe(at("2026-01-16", "00:30"));
+      expect(on({ ...four, minIntervalMin: 30 }, late)[3].effectiveAt).toBe(at("2026-01-15", "23:00"));
+    });
+
+    it("never crosses the night", () => {
+      // Evening dose 3 h late: the next morning stays 08:00 (a wake time lies between).
+      const logs = [log(at("2026-01-15", "23:00"), at("2026-01-15", "20:00"))];
+      expect(slotsOn(twice, logs, "2026-01-16", at("2026-01-16", "06:00"))[0].effectiveAt).toBe(at("2026-01-16", "08:00"));
+      // A slot whose nominal time is in the sleep window does not drift.
+      const night = sched({ times: ["08:00", "16:00", "00:00"] });
+      const late = [log(at("2026-01-15", "19:00"), at("2026-01-15", "16:00"))];
+      const slots = fixedSlots(night, late, at("2026-01-15", "12:00"), at("2026-01-16", "01:00"), state(at("2026-01-15", "19:01")));
+      expect(slots.find((s) => s.slotAt === at("2026-01-16", "00:00"))!.effectiveAt).toBe(at("2026-01-16", "00:00"));
+    });
+
+    it("none after a skip, none when disabled", () => {
+      const skipped = [log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"), "skipped")];
+      expect(on(twice, skipped)[1].effectiveAt).toBe(at("2026-01-15", "20:00"));
+      expect(eveningAfter("10:00", { ...twice, drift: false })).toBe(at("2026-01-15", "20:00"));
+    });
+
+    it("uncertain doses drift like taken ones", () => {
+      const unsure = [log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"), "uncertain")];
+      expect(on(twice, unsure)[1].effectiveAt).toBe(at("2026-01-15", "21:00"));
+    });
+
+    it("around the clock: no bedtime clamp", () => {
+      const allDay = { ...twice, day: null };
+      const logs = [log(at("2026-01-15", "16:00"), at("2026-01-15", "08:00"))];
+      const slots = fixedSlots(allDay, logs, at("2026-01-15", "00:00"), at("2026-01-15", "23:59"), state(at("2026-01-15", "16:01")));
+      expect(slots[1].effectiveAt).toBe(at("2026-01-16", "00:00"));
+    });
+  });
+
+  it("the logged toast learns when a log moved the next slot", () => {
+    const morning = log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"));
+    expect(nextSlotChange(twice, [], morning, at("2026-01-15", "10:00"))).toBe(at("2026-01-15", "21:00"));
+    expect(nextSlotChange(twice, [], log(at("2026-01-15", "08:10"), at("2026-01-15", "08:00")), 0)).toBeNull();
+    expect(nextSlotChange({ ...twice, drift: false }, [], morning, 0)).toBeNull();
+    expect(nextSlotChange(twice, [], log(at("2026-01-15", "10:00"), null), 0)).toBeNull();
+  });
+
+  it("17. interval: a due time in the sleep window is effective at the next wake time", () => {
+    const logs = [log(at("2026-01-15", "17:10"), at("2026-01-15", "17:00"))];
+    const now = at("2026-01-16", "02:00");
+    const slot = intervalSlot(every8, logs, 0, { now, leadMin: 10, missedFrom: null })!;
+    expect(slot.slotAt).toBe(at("2026-01-16", "01:10"));
+    expect(slot.effectiveAt).toBe(at("2026-01-16", "07:00"));
+    expect(slot.moved).toBe("night");
+    expect(slot.state).toBe("upcoming");
+    const allDay = intervalSlot({ ...every8, day: null }, logs, 0, { now, leadMin: 10, missedFrom: null })!;
+    expect(allDay.effectiveAt).toBe(at("2026-01-16", "01:10"));
+    expect(allDay.state).toBe("overdue");
+  });
+
+  it("18. reminder events use the drifted effective time", () => {
+    const logs = [log(at("2026-01-15", "10:00"), at("2026-01-15", "08:00"))];
+    const ev = reminderEvents({
+      schedule: twice,
+      logs,
+      anchor: 0,
+      remindFrom: 0,
+      settings: { leadMin: 10, nagEveryMin: 0, nagMaxMin: 0 },
+      snoozes: [],
+      from: at("2026-01-15", "10:00"),
+      to: at("2026-01-15", "23:59"),
+    });
+    expect(ev.map((e) => [e.kind, e.slotAt, e.at])).toEqual([
+      ["headsUp", at("2026-01-15", "20:00"), at("2026-01-15", "20:50")],
+      ["due", at("2026-01-15", "20:00"), at("2026-01-15", "21:00")],
+    ]);
+  });
+
+  it("19. inSleep at both window edges and for a wrapping window", () => {
+    expect(inSleep("07:00", DAY_7_23)).toBe(false);
+    expect(inSleep("23:00", DAY_7_23)).toBe(false);
+    expect(inSleep("06:59", DAY_7_23)).toBe(true);
+    expect(inSleep("23:01", DAY_7_23)).toBe(true);
+    expect(inSleep("03:00", DAY_7_23)).toBe(true);
+    const wrap = { wake: "15:00", bed: "07:00" };
+    expect(inSleep("15:00", wrap)).toBe(false);
+    expect(inSleep("07:00", wrap)).toBe(false);
+    expect(inSleep("02:00", wrap)).toBe(false);
+    expect(inSleep("07:01", wrap)).toBe(true);
+    expect(inSleep("14:59", wrap)).toBe(true);
+    expect(inSleep("12:00", null)).toBe(false);
+  });
+
+  it("day windows must be 6–23 h awake", () => {
+    expect(validDayWindow(DAY_7_23)).toBe(true);
+    expect(validDayWindow({ wake: "15:00", bed: "07:00" })).toBe(true);
+    expect(validDayWindow({ wake: "07:00", bed: "12:59" })).toBe(false);
+    expect(validDayWindow({ wake: "07:00", bed: "06:30" })).toBe(false);
+    expect(validDayWindow({ wake: "07:00", bed: "06:00" })).toBe(true);
+    expect(validDayWindow({ wake: "07:00", bed: "07:00" })).toBe(false);
   });
 });
 

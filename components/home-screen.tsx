@@ -4,14 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BellRing, CircleCheckBig, ClipboardCheck, Plus } from "lucide-react";
+import { BellRing, CircleCheckBig, ClipboardCheck, Moon, Plus } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AsNeededCard } from "@/components/as-needed-card";
 import { DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
+import { EarlierDoseButton } from "@/components/earlier-dose";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
 import { LogSheet } from "@/components/log-sheet";
 import { MedicineDialog } from "@/components/medicine-dialog";
+import { NightReviewSheet } from "@/components/night-review-sheet";
 import { Onboarding } from "@/components/onboarding";
 import { ReviewScreen } from "@/components/review-screen";
 import { usePersons } from "@/components/person-context";
@@ -23,6 +25,9 @@ import { DAY, isFinished, type LogEntry } from "@/lib/schedule";
 import {
   currentScheduleFrom,
   doseAmountOf,
+  dayOf,
+  nightCandidates,
+  personDayOf,
   scheduleOf,
   toLogEntries,
   type DoseDTO,
@@ -60,6 +65,8 @@ async function loadHome(personId: string, onMigrated: () => void): Promise<HomeD
 
 const REVIEW_KEY = "pills.reviewClosed";
 const PROMPT_KEY = "pills.reminderPromptDismissed";
+/** "Leave for now" in the night-dose preview hides the banner for this session. */
+const NIGHT_KEY = "pills.nightLeft";
 
 function readFlag(storage: "session" | "local", key: string) {
   try {
@@ -83,7 +90,8 @@ export function HomeScreen() {
   const t = useTranslations();
   const { current, meId, reload: reloadPersons } = usePersons();
   const personId = current?.id;
-  const timeZone = current?.timezone ?? "Europe/Oslo";
+  const person = useMemo(() => personDayOf(current), [current]);
+  const timeZone = person.timezone;
   const now = useNow();
   const support = usePushSupport();
   const device = useDevicePush(support);
@@ -98,6 +106,8 @@ export function HomeScreen() {
   const [promptDismissed, setPromptDismissed] = useState(
     () => typeof window !== "undefined" && readFlag("local", PROMPT_KEY),
   );
+  const [nightOpen, setNightOpen] = useState(false);
+  const [nightLeft, setNightLeft] = useState(() => typeof window !== "undefined" && readFlag("session", NIGHT_KEY));
 
   useEffect(() => {
     if (!personId) return;
@@ -142,17 +152,17 @@ export function HomeScreen() {
     ).catch(() => {});
   }, [ready, logsByMed]);
 
-  const { requestLog, dialog } = useDoseLogger({
+  const { requestLog, dialog, slotFor } = useDoseLogger({
     profile: ready?.profile ?? null,
-    timeZone,
+    person,
     logsFor,
     onLogged: (dose) => setData((d) => (d ? { ...d, doses: [dose, ...d.doses] } : d)),
     onUndone: (id) => setData((d) => (d ? { ...d, doses: d.doses.filter((x) => x.id !== id) } : d)),
   });
 
   const active = useMemo(
-    () => medicines.filter((m) => !m.archivedAt && !m.hidden && !isFinished(scheduleOf(m, timeZone), now)),
-    [medicines, timeZone, now],
+    () => medicines.filter((m) => !m.archivedAt && !m.hidden && !isFinished(scheduleOf(m, person), now)),
+    [medicines, person, now],
   );
 
   const checklist = useMemo(
@@ -160,7 +170,7 @@ export function HomeScreen() {
       buildChecklist(
         active.map((m) => ({
           id: m.id,
-          schedule: scheduleOf(m, timeZone),
+          schedule: scheduleOf(m, person),
           logs: logsFor(m.id),
           anchor: Date.parse(m.scheduleReviewedAt ?? m.createdAt),
           slotsFrom: m.scheduleChangedAt ? currentScheduleFrom(m) : null,
@@ -169,8 +179,11 @@ export function HomeScreen() {
         now,
         ready?.profile.remindLeadMin ?? 10,
       ),
-    [active, timeZone, logsFor, now, ready],
+    [active, person, logsFor, now, ready],
   );
+
+  const night = useMemo(() => nightCandidates(medicines, person, now), [medicines, person, now]);
+  const windowText = `${person.wakeTime}–${person.bedTime}`;
 
   if (!ready || !current) {
     return <p className="py-12 text-center text-muted-foreground">{t("common.loading")}</p>;
@@ -204,6 +217,7 @@ export function HomeScreen() {
     <MedicineDialog
       medicine={changing}
       timeZone={timeZone}
+      day={dayOf(person)}
       showReminderSwitch={support === "supported" && profile.remindersOn}
       onClose={() => setChanging(null)}
       onChanged={() => {
@@ -241,7 +255,7 @@ export function HomeScreen() {
   const skip = (m: MedicineDTO, slotAt: number) =>
     requestLog(m, { amount: doseAmountOf(m), status: "skipped", slotAt });
 
-  const asNeeded = active.filter((m) => scheduleOf(m, timeZone).mode === "asNeeded");
+  const asNeeded = active.filter((m) => scheduleOf(m, person).mode === "asNeeded");
   const showPrompt =
     support === "supported" &&
     profile.remindersOn &&
@@ -259,6 +273,16 @@ export function HomeScreen() {
           <p className="flex-1 text-sm">{t("review.banner", { count: unreviewed.length })}</p>
           <Button size="sm" variant="outline" onClick={() => setReviewClosed(false)}>
             {t("review.open")}
+          </Button>
+        </Card>
+      )}
+
+      {night.length > 0 && !nightLeft && !unreviewed.length && (
+        <Card className="flex-row items-center gap-3 p-3">
+          <Moon className="size-5 shrink-0 text-muted-foreground" />
+          <p className="flex-1 text-sm">{t("night.banner", { window: windowText })}</p>
+          <Button size="sm" variant="outline" onClick={() => setNightOpen(true)}>
+            {t("night.review")}
           </Button>
         </Card>
       )}
@@ -418,12 +442,18 @@ export function HomeScreen() {
         </section>
       )}
 
+      <EarlierDoseButton
+        medicines={active}
+        onPick={(m) => setSheet({ medicine: m, initialAt: Date.now() })}
+      />
+
       {sheet && (
         <LogSheet
           medicine={sheet.medicine}
           timeZone={timeZone}
           slotAt={sheet.slotAt}
           initialAt={sheet.initialAt}
+          countsAs={(at, n) => slotFor(sheet.medicine, at, sheet.slotAt, n)}
           onClose={() => setSheet(null)}
           onSubmit={(req) => {
             const m = sheet.medicine;
@@ -440,6 +470,21 @@ export function HomeScreen() {
           onClose={() => setEditing(null)}
           onChanged={() => {
             setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {nightOpen && (
+        <NightReviewSheet
+          candidates={night}
+          window={windowText}
+          onClose={() => setNightOpen(false)}
+          onApplied={(leftSome) => {
+            if (leftSome) {
+              writeFlag("session", NIGHT_KEY);
+              setNightLeft(true);
+            }
+            setNightOpen(false);
             reload();
           }}
         />

@@ -39,11 +39,11 @@ export function findAccessibleMedicine(userId: string, medicineId: string) {
   });
 }
 
-/** Same, with the person's timezone (needed for any schedule math). */
+/** Same, with the person's time zone and day window (needed for any schedule math). */
 export function findAccessibleMedicineWithPerson(userId: string, medicineId: string) {
   return prisma.medicine.findFirst({
     where: { id: medicineId, person: { access: { some: { userId } } } },
-    include: { person: { select: { id: true, timezone: true } } },
+    include: { person: { select: { id: true, timezone: true, wakeTime: true, bedTime: true } } },
   });
 }
 
@@ -100,6 +100,8 @@ export function toPersonDTO(user: User, p: NonNullable<PersonWithAccess>): Perso
     name: p.name,
     kind: p.kind,
     timezone: p.timezone,
+    wakeTime: p.wakeTime,
+    bedTime: p.bedTime,
     reminders: p.access.find((a) => a.userId === user.id)?.reminders ?? false,
     isSelf: p.selfOfUserId === user.id,
     isOtherUsersSelf: p.selfOfUserId !== null && p.selfOfUserId !== user.id,

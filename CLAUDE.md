@@ -9,17 +9,25 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 
 - `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login)
 - `npm run build` / `npm run lint`
-- `npx vitest run` — unit tests (schedule, dose check, migration guess, timezone math)
+- `npx vitest run` — unit tests (schedule, day window, drift, dose check, migration guess,
+  timezone math, reminder text)
 - `npx prisma migrate dev` — apply/create migrations (SQLite)
 
 ## Architecture
 
 - **`lib/schedule.ts`** — the core. Pure, clock-free scheduling model: three modes
   (`fixed` clock times, `interval`, `asNeeded`), slots identified by their UTC instant
-  `slotAt`, slot states (upcoming/due/overdue/missed/taken/skipped), the push rule,
-  slot assignment for a tap or a backdated log, reminder events, history slots. Used
-  identically by the client (checklist, history), the API (assigns `DoseLog.slotAt` on
-  write — the server is the source of truth) and the reminder tick.
+  `slotAt`, slot states (upcoming/due/overdue/missed/taken/skipped), late-dose **drift**
+  plus the push rule, slot assignment (`assignSlot` without a row, `slotForLog` with or
+  without one), reminder events, history slots, and the **day window** helpers
+  (`inSleep`, `spreadTimes`, `fitTimes`). Used identically by the client (checklist,
+  history), the API (assigns `DoseLog.slotAt` on write through `slotForLog` — the server
+  is the source of truth) and the reminder tick.
+- **Day window** — `Person.wakeTime` / `bedTime` ("HH:MM" wall clock, may wrap midnight,
+  6–23 h awake). `scheduleOf(medicine, person)` puts it on the `Schedule` as `day`
+  (null when `Medicine.aroundTheClock`) and `drift` (`Medicine.driftEnabled`); stored
+  `ScheduleVersion`s have neither. Changing a window never moves times silently: the
+  night-dose preview (`nightCandidates` → `NightReviewSheet`) PATCHes per medicine.
 - **`lib/safety.ts`** — pure `checkDose()` → `ok | warn` with reasons. Scheduled
   medicines: only likely double doses. As needed: max per intake, min interval, max per
   day over a 20 h window (`AS_NEEDED_SLACK_H`). One confirm sheet, never blocks.
@@ -28,14 +36,15 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 - **`lib/guess.ts`** / `POST /api/persons/:id/migrate` — guesses schedules for medicines
   with `mode = null` (pre-rewrite); users confirm them on the review screen.
 - Keep all of the above pure and keep `lib/*.test.ts` passing; every scenario in
-  PLAN.md §2.6 has a test in `lib/schedule.test.ts` / `lib/safety.test.ts`.
+  PLAN.md §2.6 has a test in `lib/schedule.test.ts` / `lib/safety.test.ts`. Vitest has
+  the `@/` alias (`vitest.config.ts`), but the pure modules import each other relatively.
 - **Reminders** — `instrumentation.ts` starts a 60 s tick (`lib/reminders.ts`, I/O only)
   in the Node runtime. Each send inserts a `ReminderLog` row first (unique key ⇒
   idempotent across restarts). `lib/push.ts` wraps `web-push`; VAPID keys come from
   `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, read at runtime
   (the public key is served by `GET /api/push/config`, not inlined at build).
   `public/sw.js` shows notifications and handles Taken / Snooze. Notification text is
-  i18n'd server-side via `lib/reminder-text.ts`.
+  i18n'd server-side via `lib/reminder-text.ts` (verb by form: creams are "applied").
 - **API** — route handlers under `app/api/*`, authenticated via `withUser()` in
   `lib/api.ts`. Data is scoped by **person** (see below), not by user: always go through
   the access helpers in `lib/persons.ts` (`resolvePersonId`, `findAccessibleMedicine`,
@@ -67,6 +76,11 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 
 ## Conventions
 
+- A log opened from a row keeps the row's slot only from the slot's `windowStart` on (and
+  not from an earlier local day), except taps; otherwise the window rule decides
+  (`slotForLog`). Never send a row's slot without resolving it.
+- Counted units `pcs` / `appl` render through i18n (`formatDose`, `unitLabel`,
+  `isCountUnit`); other units are shown as typed.
 - Doses have `status`: `taken | uncertain | skipped`. An uncertain log always fills a slot;
   for as-needed limits it counts unless the user turned `countUncertain` off. Skipped
   never counts.

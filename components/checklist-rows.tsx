@@ -15,6 +15,9 @@ import type { LogEntry, Slot } from "@/lib/schedule";
 import { colorClasses, doseAmountOf, type MedicineDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+/** Messages pick their verb by form: "Apply" for creams, "Take" otherwise. */
+const verbForm = (m: Pick<MedicineDTO, "form">) => (m.form === "cream" ? "cream" : "other");
+
 export function Section({ title, children, tone }: { title: string; children: React.ReactNode; tone?: "alert" }) {
   return (
     <section className="space-y-1.5">
@@ -49,7 +52,29 @@ function SlotTime({ slot, timeZone }: { slot: Slot; timeZone: string }) {
   );
 }
 
-function Name({ medicine, sub }: { medicine: MedicineDTO; sub?: React.ReactNode }) {
+/** Why a slot's time moved: "Moved 1 h because the last dose was late". */
+function MovedReason({ slot }: { slot: Slot }) {
+  const t = useTranslations();
+  if (!slot.moved) return null;
+  return (
+    <span className="block text-xs text-muted-foreground">
+      {slot.moved === "late"
+        ? t("home.movedLate", { by: formatDuration(slot.effectiveAt - slot.slotAt, t) })
+        : t("home.movedNight")}
+    </span>
+  );
+}
+
+function Name({
+  medicine,
+  sub,
+  slot,
+}: {
+  medicine: MedicineDTO;
+  sub?: React.ReactNode;
+  /** Shows the reason when the slot's time moved. */
+  slot?: Slot;
+}) {
   const t = useTranslations();
   const colors = colorClasses[medicine.color] ?? colorClasses.blue;
   return (
@@ -61,6 +86,7 @@ function Name({ medicine, sub }: { medicine: MedicineDTO; sub?: React.ReactNode 
           {formatDose(doseAmountOf(medicine), medicine.unit, t)}
           {sub && <> · {sub}</>}
         </span>
+        {slot && <MovedReason slot={slot} />}
       </span>
     </span>
   );
@@ -97,6 +123,7 @@ export function DueRow({
       <SlotTime slot={slot} timeZone={timeZone} />
       <Name
         medicine={medicine}
+        slot={slot}
         sub={
           late >= 60_000 ? (
             <span className="font-medium text-amber-700 dark:text-amber-400">
@@ -108,7 +135,7 @@ export function DueRow({
         }
       />
       <Button className="h-10 px-4" onClick={onTake}>
-        {t("home.take")}
+        {t("home.take", { form: verbForm(medicine) })}
       </Button>
       <MoreButton onClick={onMore} />
     </li>
@@ -135,12 +162,12 @@ export function MissedRow({
     <li className="space-y-2 py-2.5 pl-4 pr-2">
       <div className="flex items-center gap-3">
         <SlotTime slot={slot} timeZone={timeZone} />
-        <Name medicine={medicine} sub={<span className="font-medium">{t("home.missedBadge")}</span>} />
+        <Name medicine={medicine} slot={slot} sub={<span className="font-medium">{t("home.missedBadge")}</span>} />
         <MoreButton onClick={onMore} />
       </div>
       <div className="flex gap-2 pl-15">
         <Button size="sm" variant="outline" onClick={onTakeLate}>
-          {t("home.takeLate")}
+          {t("home.takeLate", { form: verbForm(medicine) })}
         </Button>
         <Button size="sm" variant="ghost" onClick={onSkip}>
           {t("home.skip")}
@@ -171,11 +198,11 @@ export function LaterRow({
       <DropdownMenu>
         <DropdownMenuTrigger className="flex w-full items-center gap-3 py-2.5 pl-4 pr-4 text-left hover:bg-accent/50">
           <SlotTime slot={slot} timeZone={timeZone} />
-          <Name medicine={medicine} />
+          <Name medicine={medicine} slot={slot} />
           <Ellipsis className="size-5 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onClick={onTakeNow}>{t("home.takeNowEarly")}</DropdownMenuItem>
+          <DropdownMenuItem onClick={onTakeNow}>{t("home.takeNowEarly", { form: verbForm(medicine) })}</DropdownMenuItem>
           <DropdownMenuItem onClick={onSkip}>{t("home.skip")}</DropdownMenuItem>
           <DropdownMenuItem onClick={onMore}>{t("home.moreOptions")}</DropdownMenuItem>
         </DropdownMenuContent>

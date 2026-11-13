@@ -1,20 +1,31 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { WarningDialog } from "@/components/warning-dialog";
 import type { LogRequest } from "@/components/log-sheet";
 import { api } from "@/lib/client";
-import { formatDose } from "@/lib/format";
+import { formatDose, formatTime, formatWhen } from "@/lib/format";
 import { closeStaleNotifications } from "@/lib/push-client";
 import { checkDose, type CheckResult } from "@/lib/safety";
-import { assignSlot, isScheduled, type LogEntry } from "@/lib/schedule";
-import { scheduleOf, type DoseDTO, type LogResponse, type MedicineDTO, type ProfileDTO } from "@/lib/types";
+import { nextSlotChange, slotForLog, type DoseStatus, type LogEntry } from "@/lib/schedule";
+import { localDate } from "@/lib/tz";
+import {
+  scheduleOf,
+  type DoseDTO,
+  type LogResponse,
+  type MedicineDTO,
+  type PersonDay,
+  type ProfileDTO,
+} from "@/lib/types";
+
+/** A request with its time fixed and its slot resolved (null = no slot, undefined = server assigns). */
+type Resolved = Omit<LogRequest, "slotAt"> & { takenAt: number; slotAt: number | null | undefined };
 
 interface Pending {
   medicine: MedicineDTO;
-  req: LogRequest & { takenAt: number };
+  req: Resolved;
   check: CheckResult;
 }
 
@@ -24,22 +35,34 @@ interface Pending {
  */
 export function useDoseLogger({
   profile,
-  timeZone,
+  person,
   logsFor,
   onLogged,
   onUndone,
 }: {
   profile: ProfileDTO | null;
-  timeZone: string;
+  /** The current person: time zone and day window. */
+  person: PersonDay;
   logsFor: (medicineId: string) => LogEntry[];
   onLogged: (dose: DoseDTO) => void;
   onUndone: (doseId: string) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [pending, setPending] = useState<Pending | null>(null);
 
+  /** The slot a log at `at` answers, from a row (`rowSlotAt`) or not — same rule as the server. */
+  const slotFor = useCallback(
+    (medicine: MedicineDTO, at: number, rowSlotAt: number | undefined, now: number) =>
+      slotForLog(scheduleOf(medicine, person), logsFor(medicine.id), rowSlotAt, at, now, {
+        leadMin: profile?.remindLeadMin ?? 10,
+        anchor: Date.parse(medicine.scheduleReviewedAt ?? medicine.createdAt),
+      }),
+    [person, logsFor, profile],
+  );
+
   const persist = useCallback(
-    async (medicine: MedicineDTO, req: LogRequest & { takenAt: number }, confirmed = false) => {
+    async (medicine: MedicineDTO, req: Resolved, confirmed = false) => {
       try {
         const res = await api<LogResponse>("/api/doses", {
           method: "POST",
@@ -47,8 +70,10 @@ export function useDoseLogger({
             medicineId: medicine.id,
             amount: req.amount,
             takenAt: new Date(req.takenAt).toISOString(),
-            // Only an explicitly chosen row is sent; otherwise the server assigns.
-            ...(req.slotAt !== undefined ? { slotAt: new Date(req.slotAt).toISOString() } : {}),
+            // A row's slot is sent as resolved (null = no slot); without a row the server assigns.
+            ...(req.slotAt !== undefined
+              ? { slotAt: req.slotAt === null ? null : new Date(req.slotAt).toISOString() }
+              : {}),
             status: req.status,
             note: req.note,
           }),
@@ -65,12 +90,35 @@ export function useDoseLogger({
           !confirmed && res.check.level === "warn" && res.check.reasons[0]?.code !== "overIntake"
             ? res.check.reasons[0]
             : null;
+        const now = Date.now();
+        // A log for another day won't show under Done, so the toast names the day and time.
+        const otherDay = localDate(req.takenAt, person.timezone) !== localDate(now, person.timezone);
         const message = serverWarning
           ? t("warning.afterTheFact", { name: medicine.name })
           : req.status === "skipped"
             ? t("home.skippedToast", { name: medicine.name })
-            : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
+            : otherDay
+              ? t("home.loggedAt", {
+                  name: medicine.name,
+                  when: formatWhen(req.takenAt, now, locale, person.timezone, t),
+                })
+              : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
+        // Drift / push rule: say when this log moved the next dose.
+        const movedTo = nextSlotChange(
+          scheduleOf(medicine, person),
+          logsFor(medicine.id),
+          {
+            id: logged.id,
+            takenAt: Date.parse(logged.takenAt),
+            slotAt: logged.slotAt === null ? null : Date.parse(logged.slotAt),
+            status: logged.status as DoseStatus,
+            amount: logged.amount,
+          },
+          now,
+        );
         (serverWarning ? toast.warning : toast.success)(message, {
+          description:
+            movedTo !== null ? t("home.nextMoved", { time: formatTime(movedTo, locale, person.timezone) }) : undefined,
           duration: 8000,
           action: {
             label: t("home.undo"),
@@ -89,27 +137,23 @@ export function useDoseLogger({
         toast.error(t("common.error"));
       }
     },
-    [t, onLogged, onUndone, logsFor],
+    [t, locale, person, onLogged, onUndone, logsFor],
   );
 
   const requestLog = useCallback(
     (medicine: MedicineDTO, request: LogRequest) => {
-      const req = { ...request, takenAt: request.takenAt ?? Date.now() };
+      const now = Date.now();
+      const takenAt = request.takenAt ?? now;
+      const slotAt = slotFor(medicine, takenAt, request.slotAt, now);
+      // From a row, send the resolved slot (a dose backdated past the row's window
+      // answers an earlier slot or none); otherwise the server assigns with fresh data.
+      const req: Resolved = { ...request, takenAt, slotAt: request.slotAt !== undefined ? slotAt : undefined };
       if (req.status === "skipped") {
         void persist(medicine, req);
         return;
       }
-      const schedule = scheduleOf(medicine, timeZone);
+      const schedule = scheduleOf(medicine, person);
       const logs = logsFor(medicine.id);
-      const slotAt =
-        req.slotAt !== undefined
-          ? req.slotAt
-          : isScheduled(schedule.mode)
-            ? assignSlot(schedule, logs, req.takenAt, Date.now(), {
-                leadMin: profile?.remindLeadMin ?? 10,
-                anchor: Date.parse(medicine.scheduleReviewedAt ?? medicine.createdAt),
-              })
-            : null;
       const check = checkDose({
         schedule,
         limits: {
@@ -124,14 +168,14 @@ export function useDoseLogger({
       if (check.level === "warn") setPending({ medicine, req, check });
       else void persist(medicine, req);
     },
-    [persist, timeZone, logsFor, profile],
+    [persist, person, logsFor, profile, slotFor],
   );
 
   const dialog = pending ? (
     <WarningDialog
       check={pending.check}
       medicine={pending.medicine}
-      timeZone={timeZone}
+      timeZone={person.timezone}
       onConfirm={() => {
         void persist(pending.medicine, pending.req, true);
         setPending(null);
@@ -140,5 +184,5 @@ export function useDoseLogger({
     />
   ) : null;
 
-  return { requestLog, dialog };
+  return { requestLog, dialog, slotFor };
 }

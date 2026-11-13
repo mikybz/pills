@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EarlierDoseButton } from "@/components/earlier-dose";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
 import { LogSheet } from "@/components/log-sheet";
 import { usePersons } from "@/components/person-context";
@@ -30,6 +31,7 @@ import { addDays, localDate, startOfLocalDay, weekdayMon0 } from "@/lib/tz";
 import {
   colorClasses,
   doseAmountOf,
+  personDayOf,
   segmentsOf,
   toLogEntries,
   type DoseDTO,
@@ -67,7 +69,8 @@ export function HistoryScreen() {
   const locale = useLocale();
   const { current, meId } = usePersons();
   const personId = current?.id;
-  const tz = current?.timezone ?? "Europe/Oslo";
+  const person = useMemo(() => personDayOf(current), [current]);
+  const tz = person.timezone;
   const now = useNow();
   const [range, setRange] = useState<Range>("week");
   const [medicineFilter, setMedicineFilter] = useState<string>("all");
@@ -80,7 +83,7 @@ export function HistoryScreen() {
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const [editing, setEditing] = useState<DoseDTO | null>(null);
-  const [sheet, setSheet] = useState<{ medicine: MedicineDTO; slotAt: number } | null>(null);
+  const [sheet, setSheet] = useState<{ medicine: MedicineDTO; slotAt?: number; initialAt: number } | null>(null);
 
   const key = `${personId}|${range}`;
   useEffect(() => {
@@ -133,11 +136,11 @@ export function HistoryScreen() {
   const slotsByMed = useMemo(() => {
     const map = new Map<string, HistorySlot[]>();
     for (const m of filtered) {
-      const slots = historySlots(segmentsOf(m, tz, now), logsFor(m.id), rangeStart, now, now);
+      const slots = historySlots(segmentsOf(m, person, now), logsFor(m.id), rangeStart, now, now);
       if (slots.length) map.set(m.id, slots);
     }
     return map;
-  }, [filtered, tz, now, logsFor, rangeStart]);
+  }, [filtered, person, now, logsFor, rangeStart]);
 
   const visibleDoses = useMemo(
     () =>
@@ -180,9 +183,9 @@ export function HistoryScreen() {
     return { taken, missed: missedN, skipped, total: taken + missedN + skipped };
   }, [slotsByMed]);
 
-  const { requestLog, dialog } = useDoseLogger({
+  const { requestLog, dialog, slotFor } = useDoseLogger({
     profile: ready?.profile ?? null,
-    timeZone: tz,
+    person,
     logsFor,
     onLogged: reload,
     onUndone: reload,
@@ -326,6 +329,11 @@ export function HistoryScreen() {
             </div>
           )}
 
+          <EarlierDoseButton
+            medicines={medicines.filter((m) => !m.archivedAt)}
+            onPick={(m) => setSheet({ medicine: m, initialAt: Date.now() })}
+          />
+
           <DayList
             doses={visibleDoses}
             missed={missed}
@@ -336,7 +344,7 @@ export function HistoryScreen() {
             locale={locale}
             meId={meId}
             onEdit={setEditing}
-            onTookIt={(m, slotAt) => setSheet({ medicine: m, slotAt })}
+            onTookIt={(m, slotAt) => setSheet({ medicine: m, slotAt, initialAt: slotAt })}
             onSkip={(m, slotAt) => requestLog(m, { amount: doseAmountOf(m), takenAt: slotAt, status: "skipped", slotAt })}
           />
         </>
@@ -359,7 +367,8 @@ export function HistoryScreen() {
           medicine={sheet.medicine}
           timeZone={tz}
           slotAt={sheet.slotAt}
-          initialAt={sheet.slotAt}
+          initialAt={sheet.initialAt}
+          countsAs={(at, n) => slotFor(sheet.medicine, at, sheet.slotAt, n)}
           onClose={() => setSheet(null)}
           onSubmit={(req) => {
             const m = sheet.medicine;

@@ -1,4 +1,4 @@
-import { formatAmount, formatList } from "@/lib/format";
+import { formatAmount, formatList, isCountUnit } from "@/lib/format";
 import { sortTimes } from "@/lib/schedule";
 import { parseTimes, type MedicineDTO } from "@/lib/types";
 
@@ -17,7 +17,7 @@ export function describeSchedule(
   } else if (m.mode === "interval") {
     text = t("describe.interval", { hours: formatAmount(m.intervalH ?? 0) });
   } else if (m.maxPerDay) {
-    text = t("describe.asNeededMax", { max: formatAmount(m.maxPerDay), unit: m.unit === "pcs" ? "" : ` ${m.unit}` });
+    text = t("describe.asNeededMax", { max: formatAmount(m.maxPerDay), unit: isCountUnit(m.unit) ? "" : ` ${m.unit}` });
   } else {
     text = t("describe.asNeeded");
   }
