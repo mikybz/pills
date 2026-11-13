@@ -24,6 +24,7 @@ import { DAY, isFinished, type LogEntry } from "@/lib/schedule";
 import {
   currentScheduleFrom,
   doseAmountOf,
+  dayOf,
   personDayOf,
   scheduleOf,
   toLogEntries,
@@ -207,6 +208,7 @@ export function HomeScreen() {
     <MedicineDialog
       medicine={changing}
       timeZone={timeZone}
+      day={dayOf(person)}
       showReminderSwitch={support === "supported" && profile.remindersOn}
       onClose={() => setChanging(null)}
       onChanged={() => {

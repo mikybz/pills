@@ -108,7 +108,7 @@
     "timeN": "Time {n}",
     "shiftLater": "Move the other times {by} later too",
     "shiftEarlier": "Move the other times {by} earlier too",
-    "nightHint": "{count, plural, one {One dose lands} other {# doses land}} at night ({times}).",
+    "nightHint": "{count, plural, one {One dose lands} other {# doses land}} at night ({times}), outside your day ({window}).",
     "nightHintInterval": "With this interval, some doses can land at night.",
     "dose": "Dose",
     "maxPerDay": "Max per day (optional)",
@@ -141,7 +141,14 @@
     "notes": "Notes",
     "archive": "Archive",
     "archiveConfirm": "Archive this medicine? Its history is kept.",
-    "invalid": "Please fill in a name and a dose."
+    "invalid": "Please fill in a name and a dose.",
+    "moveIntoDay": "Move into my day",
+    "keepNightDoses": "Keep night doses",
+    "nightHintIntervalDay": "A dose that falls due at night (outside {window}) waits until you wake up. Turn on \"Also at night\" to take it at night.",
+    "aroundTheClock": "Also at night",
+    "aroundTheClockHint": "Doses may be at night: the usual day ({window}) is ignored for this medicine.",
+    "drift": "Adjust the next dose when I'm late",
+    "driftHint": "Taken 2 h late? The next dose moves 1 h (in half hours), never past bedtime. Then the day is back on the clock."
   },
   "review": {
     "title": "Check your schedules",

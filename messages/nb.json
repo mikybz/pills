@@ -108,7 +108,7 @@
     "timeN": "Klokkeslett {n}",
     "shiftLater": "Flytt de andre tidene {by} senere også",
     "shiftEarlier": "Flytt de andre tidene {by} tidligere også",
-    "nightHint": "{count, plural, one {Én dose havner} other {# doser havner}} om natten ({times}).",
+    "nightHint": "{count, plural, one {Én dose havner} other {# doser havner}} om natten ({times}), utenfor dagen din ({window}).",
     "nightHintInterval": "Med dette intervallet kan noen doser havne om natten.",
     "dose": "Dose",
     "maxPerDay": "Maks per dag (valgfritt)",
@@ -141,7 +141,14 @@
     "notes": "Notater",
     "archive": "Arkiver",
     "archiveConfirm": "Arkivere denne medisinen? Historikken beholdes.",
-    "invalid": "Fyll inn navn og dose."
+    "invalid": "Fyll inn navn og dose.",
+    "moveIntoDay": "Flytt inn i dagen min",
+    "keepNightDoses": "Behold nattdoser",
+    "nightHintIntervalDay": "En dose som skal tas om natten (utenfor {window}), venter til du står opp. Slå på «Også om natten» for å ta den om natten.",
+    "aroundTheClock": "Også om natten",
+    "aroundTheClockHint": "Doser kan være om natten: den vanlige dagen ({window}) gjelder ikke for denne medisinen.",
+    "drift": "Juster neste dose når jeg er sen",
+    "driftHint": "Tatt 2 t for sent? Neste dose flyttes 1 t (i halvtimer), aldri forbi leggetid. Så er dagen tilbake på klokka."
   },
   "review": {
     "title": "Sjekk tidsplanene",
