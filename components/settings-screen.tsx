@@ -12,6 +12,7 @@ import {
   LogOut,
   Pencil,
   Plus,
+  Sun,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { MedicineDialog } from "@/components/medicine-dialog";
 import { HelpSheet } from "@/components/help-sheet";
-import { PeopleSection } from "@/components/people-section";
+import { PeopleSection, PersonDialog } from "@/components/people-section";
 import { RemindersSection } from "@/components/reminders-section";
 import { usePersons } from "@/components/person-context";
 import { api } from "@/lib/client";
@@ -40,7 +41,7 @@ import { cn } from "@/lib/utils";
 export function SettingsScreen() {
   const t = useTranslations();
   const locale = useLocale();
-  const { current } = usePersons();
+  const { current, reload: reloadPersons } = usePersons();
   const personId = current?.id;
   const person = personDayOf(current);
   const timeZone = person.timezone;
@@ -52,6 +53,7 @@ export function SettingsScreen() {
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const [editing, setEditing] = useState<MedicineDTO | null | "new">(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [editingDay, setEditingDay] = useState(false);
 
   useEffect(() => {
     if (!personId) return;
@@ -164,6 +166,19 @@ export function SettingsScreen() {
             <Plus className="size-4" /> {t("medicine.new")}
           </Button>
         </div>
+        {current && (
+          <button
+            type="button"
+            onClick={() => setEditingDay(true)}
+            className="flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-2.5 text-left text-sm hover:bg-accent/50"
+          >
+            <Sun className="size-4 text-muted-foreground" />
+            <span className="flex-1 tabular-nums">
+              {t("people.dayRow", { window: `${person.wakeTime}–${person.bedTime}` })}
+            </span>
+            <Pencil className="size-4 text-muted-foreground" />
+          </button>
+        )}
         <Card className="gap-0 p-0">
           <ul className="divide-y">
             {active.map((m, i) => {
@@ -313,6 +328,17 @@ export function SettingsScreen() {
           onClose={() => setEditing(null)}
           onChanged={() => {
             setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {editingDay && current && (
+        <PersonDialog
+          person={current}
+          onClose={() => setEditingDay(false)}
+          onChanged={async () => {
+            setEditingDay(false);
+            await reloadPersons();
             reload();
           }}
         />

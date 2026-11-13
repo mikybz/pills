@@ -349,12 +349,31 @@
     "invalidCode": "Koden er ugyldig, allerede brukt eller utløpt.",
     "joined": "Du følger nå {name}",
     "medicinesFor": "Medisiner for {name}",
-    "loggedBy": "av {name}"
+    "loggedBy": "av {name}",
+    "awake": "Vanlig dag",
+    "awakeFrom": "Vanligvis våken fra",
+    "awakeTo": "til",
+    "wakeTime": "Står opp",
+    "bedTime": "Leggetid",
+    "awakeHint": "Foreslåtte dosetider holder seg innenfor dette tidsrommet, og en sen dose flytter aldri neste forbi leggetid.",
+    "awakeInvalid": "Våken tid må være mellom 6 og 23 timer.",
+    "dayRow": "Dag: {window}"
   },
   "day": {
     "today": "i dag",
     "yesterday": "i går",
     "on": "{date}",
     "yesterdayAt": "i går {time}"
+  },
+  "night": {
+    "banner": "Noen doser er om natten, utenfor {window}.",
+    "review": "Se over",
+    "title": "Doser om natten",
+    "intro": "Disse medisinene har doser utenfor den vanlige dagen ({window}). Velg hva du vil gjøre med hver; ingenting endres før du bruker valgene.",
+    "move": "Flytt",
+    "keep": "Behold om natten",
+    "leave": "La være nå",
+    "apply": "Bruk",
+    "applied": "Tidsplanene er oppdatert"
   }
 }

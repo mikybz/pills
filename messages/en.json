@@ -349,12 +349,31 @@
     "invalidCode": "That code is invalid, already used or expired.",
     "joined": "You now track {name}",
     "medicinesFor": "Medicines for {name}",
-    "loggedBy": "by {name}"
+    "loggedBy": "by {name}",
+    "awake": "Usual day",
+    "awakeFrom": "Usually awake from",
+    "awakeTo": "to",
+    "wakeTime": "Wake time",
+    "bedTime": "Bedtime",
+    "awakeHint": "Suggested dose times stay inside this window, and a late dose never moves the next one past bedtime.",
+    "awakeInvalid": "The awake part must be between 6 and 23 hours.",
+    "dayRow": "Day: {window}"
   },
   "day": {
     "today": "today",
     "yesterday": "yesterday",
     "on": "on {date}",
     "yesterdayAt": "yesterday {time}"
+  },
+  "night": {
+    "banner": "Some doses are at night, outside {window}.",
+    "review": "Review",
+    "title": "Doses at night",
+    "intro": "These medicines have doses outside the usual day ({window}). Choose what to do with each; nothing changes until you apply.",
+    "move": "Move",
+    "keep": "Keep at night",
+    "leave": "Leave for now",
+    "apply": "Apply",
+    "applied": "Schedules updated"
   }
 }

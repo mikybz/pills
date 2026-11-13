@@ -1,6 +1,6 @@
 import type { Medicine, DoseLog, User } from "@prisma/client";
 import type { CheckResult } from "@/lib/safety";
-import { DEFAULT_DAY, type DayWindow, type LogEntry, type Mode, type Schedule, type Segment, type DoseStatus } from "@/lib/schedule";
+import { DEFAULT_DAY, fitTimes, isFinished, sortTimes, type DayWindow, type LogEntry, type Mode, type Schedule, type Segment, type DoseStatus } from "./schedule";
 
 /** A schedule that was in force before an edit (history only). */
 export interface ScheduleVersionDTO {
@@ -154,6 +154,28 @@ export function scheduleOf(
 /** A stored ScheduleVersion → Schedule: no day window and no drift (as it behaved then). */
 export function versionScheduleOf(v: ScheduleVersionDTO): Schedule {
   return { ...baseSchedule(v, v.timezone), day: null, drift: false };
+}
+
+export interface NightCandidate {
+  medicine: MedicineDTO;
+  /** Current times (sorted) and the proposal inside the day window (`fitTimes`). */
+  from: string[];
+  to: string[];
+}
+
+/**
+ * Medicines whose fixed times reach into the person's sleep window, offered in
+ * the night-dose preview: active (not archived / hidden / finished), reviewed,
+ * fixed mode, not taken around the clock.
+ */
+export function nightCandidates(medicines: MedicineDTO[], person: PersonDay, now: number): NightCandidate[] {
+  return medicines.flatMap((m) => {
+    if (m.archivedAt || m.hidden || !m.scheduleReviewedAt || m.mode !== "fixed" || m.aroundTheClock) return [];
+    if (isFinished(scheduleOf(m, person), now)) return [];
+    const from = sortTimes(parseTimes(m.times));
+    const to = fitTimes(from, dayOf(person));
+    return to ? [{ medicine: m, from, to }] : [];
+  });
 }
 
 /** Amount for one scheduled dose (or the default quick dose). */

@@ -17,6 +17,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { NightReviewSheet } from "@/components/night-review-sheet";
+import { TimeField } from "@/components/time-field";
 import {
   MemberAvatars,
   PersonIcon,
@@ -26,7 +28,8 @@ import {
 } from "@/components/person-context";
 import { api } from "@/lib/client";
 import { formatDay, formatTime } from "@/lib/format";
-import { PERSON_KINDS, type PersonDTO } from "@/lib/types";
+import { DEFAULT_DAY, validDayWindow } from "@/lib/schedule";
+import { nightCandidates, PERSON_KINDS, type MedicineDTO, type NightCandidate, type PersonDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PeopleSection() {
@@ -179,7 +182,12 @@ export function PeopleSection() {
   );
 }
 
-function PersonDialog({
+/**
+ * Create / edit a person: name, kind, time zone and usual awake hours. After a
+ * changed day window it shows the night-dose preview for that person's
+ * medicines (when any have a dose outside the new window).
+ */
+export function PersonDialog({
   person,
   onClose,
   onChanged,
@@ -190,7 +198,11 @@ function PersonDialog({
 }) {
   const t = useTranslations("people");
   const tc = useTranslations("common");
+  const [review, setReview] = useState<{ candidates: NightCandidate[]; window: string } | null>(null);
   const [name, setName] = useState(person?.name ?? "");
+  const [wake, setWake] = useState(person?.wakeTime ?? DEFAULT_DAY.wake);
+  const [bed, setBed] = useState(person?.bedTime ?? DEFAULT_DAY.bed);
+  const windowOk = validDayWindow({ wake, bed });
   const [kind, setKind] = useState<string>(person?.kind ?? "person");
   const [timezone, setTimezone] = useState(
     () => person?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -202,13 +214,22 @@ function PersonDialog({
   }, [timezone]);
 
   async function save() {
-    if (!name.trim()) return;
+    if (!name.trim() || !windowOk) return;
     setBusy(true);
     try {
       const res = await api<PersonDTO>(person ? `/api/persons/${person.id}` : "/api/persons", {
         method: person ? "PATCH" : "POST",
-        body: JSON.stringify({ name: name.trim(), kind, timezone }),
+        body: JSON.stringify({ name: name.trim(), kind, timezone, wakeTime: wake, bedTime: bed }),
       });
+      if (person && (wake !== person.wakeTime || bed !== person.bedTime)) {
+        // Nothing moves silently: offer the medicines with a dose outside the new day.
+        const meds = await api<MedicineDTO[]>(`/api/medicines?personId=${encodeURIComponent(person.id)}`);
+        const candidates = nightCandidates(meds, res, Date.now());
+        if (candidates.length) {
+          setReview({ candidates, window: `${res.wakeTime}–${res.bedTime}` });
+          return;
+        }
+      }
       onChanged(person ? undefined : res.id);
     } catch {
       toast.error(tc("error"));
@@ -239,6 +260,17 @@ function PersonDialog({
     } catch {
       toast.error(tc("error"));
     }
+  }
+
+  if (review) {
+    return (
+      <NightReviewSheet
+        candidates={review.candidates}
+        window={review.window}
+        onClose={() => onChanged()}
+        onApplied={() => onChanged()}
+      />
+    );
   }
 
   return (
@@ -298,6 +330,19 @@ function PersonDialog({
             <p className="mt-1 text-xs text-muted-foreground">{t("timezoneHint")}</p>
           </div>
 
+          <div>
+            <Label className="mb-1.5 block">{t("awake")}</Label>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {t("awakeFrom")}
+              <TimeField value={wake} onChange={setWake} label={t("wakeTime")} />
+              {t("awakeTo")}
+              <TimeField value={bed} onChange={setBed} label={t("bedTime")} />
+            </div>
+            <p className={cn("mt-1 text-xs", windowOk ? "text-muted-foreground" : "text-destructive")}>
+              {windowOk ? t("awakeHint") : t("awakeInvalid")}
+            </p>
+          </div>
+
           {person && (
             <div>
               <Label className="mb-1.5 flex items-center gap-1.5">
@@ -345,7 +390,7 @@ function PersonDialog({
               <Trash2 className="size-4" /> {t("delete")}
             </Button>
           )}
-          <Button className="flex-1" disabled={busy || !name.trim()} onClick={save}>
+          <Button className="flex-1" disabled={busy || !name.trim() || !windowOk} onClick={save}>
             {t("save")}
           </Button>
         </DialogFooter>
