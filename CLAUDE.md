@@ -7,10 +7,11 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 
 ## Commands
 
-- `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login)
+- `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login; a
+  `devUser=anna` cookie then signs that browser in as a second user, for sharing)
 - `npm run build` / `npm run lint`
 - `npx vitest run` — unit tests (schedule, day window, drift, dose check, migration guess,
-  timezone math, reminder text)
+  timezone math, reminder text, live text)
 - `npx prisma migrate dev` — apply/create migrations (SQLite)
 
 ## Architecture
@@ -45,6 +46,13 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   (the public key is served by `GET /api/push/config`, not inlined at build).
   `public/sw.js` shows notifications and handles Taken / Snooze. Notification text is
   i18n'd server-side via `lib/reminder-text.ts` (verb by form: creams are "applied").
+- **Live updates** — `lib/live.ts` (I/O): in-process event bus on `globalThis` →
+  `GET /api/events` (SSE, 25 s heartbeat). Write routes call `publish()` / `doseCreated()` /
+  `doseChanged()` after the write (fire-and-forget); recipients come from `PersonAccess`.
+  Client: `components/live-provider.tsx` (one EventSource, overlay + chime from
+  `lib/chime.ts`); screens refetch via `useLiveRefresh(personId, reload)`. A new dose also
+  queues the opt-in push (`PersonAccess.notifyLogs`), sent after `NOTICE_DELAY_MS` so undo
+  cancels it. Wording in pure `lib/live-text.ts`. A new write route must publish too.
 - **API** — route handlers under `app/api/*`, authenticated via `withUser()` in
   `lib/api.ts`. Data is scoped by **person** (see below), not by user: always go through
   the access helpers in `lib/persons.ts` (`resolvePersonId`, `findAccessibleMedicine`,
