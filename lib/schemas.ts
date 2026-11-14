@@ -31,7 +31,7 @@ export function dayWindowProblem(p: { wakeTime: string; bedTime: string }): stri
 
 export const joinSchema = z.object({ code: z.string().min(4).max(40) });
 
-export const accessSchema = z.object({ reminders: z.boolean() });
+export const accessSchema = z.object({ reminders: z.boolean(), notifyLogs: z.boolean() });
 
 export const migrateSchema = z.object({ timezone: timeZone.optional() });
 

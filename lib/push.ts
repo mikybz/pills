@@ -25,6 +25,8 @@ export function pushConfigured(): boolean {
 }
 
 export interface PushPayload {
+  /** "logged" = someone else logged a dose (see `lib/live.ts`); reminders leave it out. */
+  kind?: "logged";
   title: string;
   body: string;
   tag: string;

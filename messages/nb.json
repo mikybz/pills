@@ -192,6 +192,9 @@
     "perPerson": "Hvem jeg vil bli minnet på",
     "perPersonHint": "En dose registrert av hvem som helst stopper påminnelsene for alle.",
     "forPerson": "Påminnelser for {name}",
+    "notifyLogs": "Si fra når noen andre registrerer",
+    "notifyLogsHint": "For personer og dyr dere deler: et varsel når noen andre gir eller hopper over en dose.",
+    "notifyFor": "Varsle meg når noen andre registrerer for {name}",
     "notConfigured": "Påminnelser er ikke satt opp på serveren ennå.",
     "promptTitle": "Få påminnelser på denne enheten?",
     "promptBody": "Et varsel før hver dose, og en påminnelse til den er registrert. Trykk Tatt eller Utsett rett i varselet.",
@@ -263,6 +266,8 @@
     "theme_dark": "Mørkt",
     "countUncertain": "Tell «usikker»-doser i grensene for ved behov",
     "countUncertainHint": "Tryggest er på: en usikker dose regnes som tatt.",
+    "liveSound": "Lyd når noen andre registrerer",
+    "liveSoundHint": "Et kort pling på denne enheten mens appen er åpen.",
     "signOut": "Logg ut",
     "help": "Hjelp",
     "saved": "Lagret"
@@ -281,6 +286,8 @@
     "asNeededBody": "Smertestillende og lignende har ingen tidsplan. Du kan sette maks per dag, maks per gang og minste tid mellom doser. «Per dag» teller de siste 20 timene i stedet for 24, så du får ikke varsel om du står opp tidligere enn i går. Kortet viser hvor mye du har brukt og når neste dose er ledig.",
     "remindersTitle": "Påminnelser",
     "remindersBody": "Slå på påminnelser under Innstillinger → Påminnelser på hver telefon eller PC du bruker. Du får et varsel før en dose, en påminnelse når det er tid, og gjentakelser til den er registrert. Trykk Tatt eller Utsett rett i varselet. For personer og dyr dere deler, velger hver av dere om dere vil bli minnet på; en dose registrert av hvem som helst stopper påminnelsene for alle. På iPhone må appen være lagt til på Hjem-skjermen.",
+    "sharedTitle": "Deling med andre",
+    "sharedBody": "Når dere deler en person eller et dyr, ser alle den samme listen. Gir noen andre en dose mens du har appen åpen, oppdateres listen med en gang, med et kort pling og en melding som «Anna ga Rex Apoquel». Vil du få beskjed også når appen er lukket, slår du på «Si fra når noen andre registrerer» under Innstillinger → Påminnelser.",
     "unsureTitle": "«Tok jeg den?»",
     "unsureBody": "Åpne appen: dagens liste viser det. Husker du virkelig ikke, registrer med «Usikker på om jeg tok den» fra ⋯-knappen. Da regnes dosen som tatt, så du ikke blir minnet på igjen, og den vises blek i historikken.",
     "backdateTitle": "Registrere tidligere doser",
@@ -381,5 +388,18 @@
     "leave": "La være nå",
     "apply": "Bruk",
     "applied": "Tidsplanene er oppdatert"
+  },
+  "live": {
+    "self": "{form, select, cream {{by} smurte på {medicine}} other {{by} tok {medicine}}}",
+    "you": "{form, select, cream {{by} smurte på {medicine} for deg} other {{by} ga deg {medicine}}}",
+    "other": "{form, select, cream {{by} smurte {medicine} på {person}} other {{by} ga {person} {medicine}}}",
+    "uncertainSelf": "{by} registrerte {medicine}, merket som usikker",
+    "uncertainYou": "{by} registrerte {medicine} for deg, merket som usikker",
+    "uncertainOther": "{by} registrerte {medicine} for {person}, merket som usikker",
+    "skippedSelf": "{by} hoppet over {medicine}",
+    "skippedYou": "{by} hoppet over {medicine} for deg",
+    "skippedOther": "{by} hoppet over {medicine} for {person}",
+    "dismiss": "Lukk",
+    "show": "Vis"
   }
 }

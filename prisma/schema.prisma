@@ -56,6 +56,8 @@ model PersonAccess {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   reminders Boolean  @default(false)
+  /// Push to this user when someone else logs a dose for this person.
+  notifyLogs Boolean @default(false)
   createdAt DateTime @default(now())
 
   @@id([personId, userId])

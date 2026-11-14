@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withUser, badRequest } from "@/lib/api";
+import { publish } from "@/lib/live";
 
 const reorderSchema = z.object({ ids: z.array(z.string().min(1)).min(1) });
 
@@ -21,6 +22,7 @@ export async function PUT(req: NextRequest) {
         prisma.medicine.update({ where: { id }, data: { sortOrder: index } }),
       ),
     );
+    publish({ type: "medicines", personId: meds[0].personId, byUserId: user.id });
     return NextResponse.json({ ok: true });
   });
 }

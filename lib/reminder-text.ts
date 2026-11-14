@@ -60,7 +60,7 @@ export function reminderPayload(args: {
       { action: "snooze", title: t("push.actionSnooze") },
     ],
     data: {
-      url: "/",
+      url: `/?person=${encodeURIComponent(args.person.id)}`,
       personId: args.person.id,
       items: args.items.map((i) => ({
         medicineId: i.medicineId,

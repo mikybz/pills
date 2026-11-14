@@ -6,6 +6,7 @@ import { hasPersonAccess } from "@/lib/persons";
 import { guessSchedule } from "@/lib/guess";
 import { DAY, type DoseStatus } from "@/lib/schedule";
 import { parsePresets } from "@/lib/types";
+import { publish } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       migrated += res.count;
     }
+    if (migrated) publish({ type: "medicines", personId: id, byUserId: user.id });
     return NextResponse.json({ migrated });
   });
 }

@@ -5,6 +5,7 @@ import { medicineSchema, scheduleProblem } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { scheduleChanged, toMedicineData } from "@/lib/medicines-server";
 import { currentScheduleFrom, parseTimes } from "@/lib/types";
+import { publish } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -65,6 +66,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         },
       });
     });
+    publish({ type: "medicines", personId: existing.personId, byUserId: user.id });
     return NextResponse.json(medicine);
   });
 }
@@ -81,12 +83,14 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     if (!existing) return notFound();
     if (existing._count.doses === 0) {
       await prisma.medicine.delete({ where: { id } });
+      publish({ type: "medicines", personId: existing.personId, byUserId: user.id });
       return NextResponse.json({ deleted: true });
     }
     const medicine = await prisma.medicine.update({
       where: { id },
       data: { archivedAt: new Date() },
     });
+    publish({ type: "medicines", personId: existing.personId, byUserId: user.id });
     return NextResponse.json(medicine);
   });
 }
