@@ -39,6 +39,30 @@ function writeSession(id: string) {
   }
 }
 
+/**
+ * `?person=<id>` (from a notification) picks the person once, then leaves the URL.
+ * Read on the first load only.
+ */
+let urlPerson: string | null | undefined;
+function takeUrlPerson(): string | null {
+  // Memoized: StrictMode runs the effect twice, the URL is cleaned after the first.
+  if (urlPerson === undefined) urlPerson = readUrlPerson();
+  return urlPerson;
+}
+
+function readUrlPerson(): string | null {
+  try {
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get("person");
+    if (!id) return null;
+    url.searchParams.delete("person");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    return id;
+  } catch {
+    return null;
+  }
+}
+
 function fetchPersons() {
   return Promise.all([api<PersonDTO[]>("/api/persons"), api<ProfileDTO>("/api/profile")]);
 }
@@ -48,11 +72,12 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
   const [defaultPersonId, setDefault] = useState<string | null>(null);
   const [currentId, setCurrentIdState] = useState<string | null>(null);
 
-  const apply = useCallback((list: PersonDTO[], profile: ProfileDTO) => {
+  const apply = useCallback((list: PersonDTO[], profile: ProfileDTO, fromUrl: string | null = null) => {
     setPersons(list);
     setDefault(profile.defaultPersonId);
+    if (fromUrl && list.some((p) => p.id === fromUrl)) writeSession(fromUrl);
     setCurrentIdState((prev) => {
-      const candidates = [prev, readSession(), profile.defaultPersonId];
+      const candidates = [fromUrl, prev, readSession(), profile.defaultPersonId];
       const found = candidates.find((id) => id && list.some((p) => p.id === id));
       return found ?? list.find((p) => p.isSelf)?.id ?? list[0]?.id ?? null;
     });
@@ -66,8 +91,9 @@ export function PersonProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+    const fromUrl = takeUrlPerson();
     fetchPersons()
-      .then(([list, profile]) => alive && apply(list, profile))
+      .then(([list, profile]) => alive && apply(list, profile, fromUrl))
       .catch(() => {});
     return () => {
       alive = false;

@@ -4,6 +4,7 @@ import { withUser, badRequest, notFound } from "@/lib/api";
 import { resolvePersonId } from "@/lib/persons";
 import { medicineSchema, scheduleProblem } from "@/lib/schemas";
 import { toMedicineData } from "@/lib/medicines-server";
+import { publish } from "@/lib/live";
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
         scheduleReviewedAt: new Date(),
       },
     });
+    publish({ type: "medicines", personId: personId, byUserId: user.id });
     return NextResponse.json(medicine, { status: 201 });
   });
 }

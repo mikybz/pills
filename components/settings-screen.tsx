@@ -29,7 +29,7 @@ import { MedicineDialog } from "@/components/medicine-dialog";
 import { HelpSheet } from "@/components/help-sheet";
 import { PeopleSection, PersonDialog } from "@/components/people-section";
 import { RemindersSection } from "@/components/reminders-section";
-import { usePersons } from "@/components/person-context";
+import { isShared, usePersons } from "@/components/person-context";
 import { api } from "@/lib/client";
 import { describeSchedule } from "@/lib/describe";
 import { usePushSupport } from "@/lib/push-client";
@@ -37,11 +37,13 @@ import { isFinished } from "@/lib/schedule";
 import { colorClasses, MEDICINE_COLORS, dayOf, personDayOf, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+import { useLiveRefresh } from "@/components/live-provider";
+import { setLiveSound, useLiveSound } from "@/lib/chime";
 
 export function SettingsScreen() {
   const t = useTranslations();
   const locale = useLocale();
-  const { current, reload: reloadPersons } = usePersons();
+  const { current, persons, reload: reloadPersons } = usePersons();
   const personId = current?.id;
   const person = personDayOf(current);
   const timeZone = person.timezone;
@@ -51,6 +53,8 @@ export function SettingsScreen() {
   const [medicines, setMedicines] = useState<{ personId: string; list: MedicineDTO[] } | null>(null);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
+  useLiveRefresh(personId, reload);
+  const liveSound = useLiveSound();
   const [editing, setEditing] = useState<MedicineDTO | null | "new">(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [editingDay, setEditingDay] = useState(false);
@@ -289,6 +293,16 @@ export function SettingsScreen() {
             </div>
             <Switch checked={profile.countUncertain} onCheckedChange={(v) => updateProfile({ countUncertain: v })} />
           </div>
+
+          {persons.some(isShared) && (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label>{t("settings.liveSound")}</Label>
+                <p className="text-xs text-muted-foreground">{t("settings.liveSoundHint")}</p>
+              </div>
+              <Switch checked={liveSound} onCheckedChange={setLiveSound} />
+            </div>
+          )}
         </Card>
       </section>
 

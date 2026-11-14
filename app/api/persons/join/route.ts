@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withUser, badRequest } from "@/lib/api";
 import { joinSchema } from "@/lib/schemas";
 import { getPersonWithAccess, hashShareCode, toPersonDTO } from "@/lib/persons";
+import { publish } from "@/lib/live";
 
 // Redeem a one-time share code → gain access to the person.
 export async function POST(req: NextRequest) {
@@ -25,6 +26,7 @@ export async function POST(req: NextRequest) {
       create: { personId: token!.personId, userId: user.id },
       update: {},
     });
+    publish({ type: "person", personId: token!.personId, byUserId: user.id });
     const person = await getPersonWithAccess(token!.personId);
     return NextResponse.json(toPersonDTO(user, person!));
   });

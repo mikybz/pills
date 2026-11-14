@@ -4,6 +4,7 @@ import { withUser, badRequest, notFound } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson, resolvePersonId } from "@/lib/persons";
 import { checkFor, logsAround, resolveSlot } from "@/lib/doses-server";
+import { doseCreated } from "@/lib/live";
 
 export async function GET(req: NextRequest) {
   return withUser(async (user) => {
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
       },
     });
     const loggedBy = { id: user.id, name: user.name, email: user.email };
+    void doseCreated(dose, loggedBy, medicine);
     return NextResponse.json({ dose: { ...dose, loggedBy }, check }, { status: 201 });
   });
 }

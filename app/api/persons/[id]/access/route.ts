@@ -6,7 +6,7 @@ import { hasPersonAccess } from "@/lib/persons";
 
 type Params = { params: Promise<{ id: string }> };
 
-// The signed-in user's own settings for a person they can access (reminders opt-in).
+// The signed-in user's own settings for a person they can access (reminders, log notices).
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   return withUser(async (user) => {
@@ -18,6 +18,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       where: { personId_userId: { personId: id, userId: user.id } },
       data: onlySent(parsed.data, body),
     });
-    return NextResponse.json({ reminders: row.reminders });
+    return NextResponse.json({ reminders: row.reminders, notifyLogs: row.notifyLogs });
   });
 }

@@ -18,6 +18,7 @@ export function AsNeededCard({
   timeZone,
   countUncertain,
   lastBy,
+  highlight,
   onQuickLog,
   onMore,
 }: {
@@ -27,6 +28,8 @@ export function AsNeededCard({
   timeZone: string;
   countUncertain: boolean;
   lastBy: string | null;
+  /** The last dose was just logged by someone else: a short glow. */
+  highlight?: boolean;
   onQuickLog: (amount: number) => void;
   onMore: () => void;
 }) {
@@ -55,7 +58,13 @@ export function AsNeededCard({
   if (status.nextFreeAt) facts.push(t("home.nextFreeAt", { time: formatTime(status.nextFreeAt, locale, timeZone) }));
 
   return (
-    <Card className={cn("gap-2.5 border-l-4 p-3.5", colors.accent)}>
+    <Card
+      className={cn(
+        "gap-2.5 border-l-4 p-3.5 transition-shadow duration-700",
+        colors.accent,
+        highlight && "ring-2 ring-teal-500",
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate font-semibold">{medicine.name}</h3>

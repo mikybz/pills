@@ -59,6 +59,8 @@ export interface PersonDTO {
   bedTime: string;
   /** Whether the signed-in user gets reminders for this person. */
   reminders: boolean;
+  /** Whether the signed-in user gets a push when someone else logs a dose for this person. */
+  notifyLogs: boolean;
   /** The signed-in user's own person — can't be deleted. */
   isSelf: boolean;
   /** Another user's own person, shared with me. */

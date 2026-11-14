@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
 import { reviewSchema } from "@/lib/schemas";
 import { hasPersonAccess } from "@/lib/persons";
+import { publish } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       },
       data: { scheduleReviewedAt: new Date() },
     });
+    if (res.count) publish({ type: "medicines", personId: id, byUserId: user.id });
     return NextResponse.json({ reviewed: res.count });
   });
 }

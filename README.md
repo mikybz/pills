@@ -24,7 +24,9 @@ See [PLAN.md](PLAN.md) for the product design (scheduling model, dose check, rem
 - **"Not sure I took it"**, "Log an earlier dose" (a dose from yesterday never fills
   today's), skipped doses, notes, undo.
 - **History** — adherence summary, missed doses, timelines, month calendar, export.
-- **People & pets** — track for others and share access.
+- **People & pets** — track for others and share access. Shared lists update live: when
+  someone else gives a dose, open apps refresh at once with a chime and a short note
+  ("Anna gave Rex Apoquel"); optionally a push notification when the app is closed.
 
 ## Stack
 
@@ -44,7 +46,10 @@ Reminders locally: put a VAPID key pair (`npx web-push generate-vapid-keys`) and
 `VAPID_SUBJECT=mailto:you@example.com` in `.env.local`. Browsers allow push on
 `http://localhost`; on another host use `next dev --experimental-https`.
 
-Run the unit tests (schedule, day window, drift, dose check, migration guess, reminder text):
+Sharing locally: with `AUTH_DEV_BYPASS=true`, a `devUser=anna` cookie signs that browser in as a
+second user ("Anna"); use a separate browser profile or a private window.
+
+Run the unit tests (schedule, day window, drift, dose check, migration guess, reminder and live text):
 
 ```bash
 npx vitest run

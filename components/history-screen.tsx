@@ -40,6 +40,7 @@ import {
 } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+import { useLiveRefresh } from "@/components/live-provider";
 
 type Range = "3d" | "week" | "month" | "year" | "all";
 const RANGE_DAYS: Record<Range, number | null> = { "3d": 3, week: 7, month: 30, year: 365, all: null };
@@ -82,6 +83,7 @@ export function HistoryScreen() {
   const [data, setData] = useState<Data | null>(null);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
+  useLiveRefresh(personId, reload);
   const [editing, setEditing] = useState<DoseDTO | null>(null);
   const [sheet, setSheet] = useState<{ medicine: MedicineDTO; slotAt?: number; initialAt: number } | null>(null);
 

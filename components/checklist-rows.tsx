@@ -216,6 +216,7 @@ export function DoneRow({
   log,
   timeZone,
   loggedBy,
+  highlight,
   onEdit,
   onMore,
 }: {
@@ -223,6 +224,8 @@ export function DoneRow({
   log: LogEntry;
   timeZone: string;
   loggedBy: string | null;
+  /** Just logged by someone else: a short glow. */
+  highlight?: boolean;
   onEdit: () => void;
   onMore: () => void;
 }) {
@@ -230,7 +233,7 @@ export function DoneRow({
   const locale = useLocale();
   const skipped = log.status === "skipped";
   return (
-    <li className="flex items-center pr-2">
+    <li className={cn("flex items-center pr-2 transition-colors duration-700", highlight && "bg-teal-500/15")}>
       <button
         type="button"
         onClick={onEdit}

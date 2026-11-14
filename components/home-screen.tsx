@@ -11,6 +11,7 @@ import { AsNeededCard } from "@/components/as-needed-card";
 import { DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
 import { EarlierDoseButton } from "@/components/earlier-dose";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
+import { useLiveRefresh, useRecentlyLogged } from "@/components/live-provider";
 import { LogSheet } from "@/components/log-sheet";
 import { MedicineDialog } from "@/components/medicine-dialog";
 import { NightReviewSheet } from "@/components/night-review-sheet";
@@ -99,6 +100,9 @@ export function HomeScreen() {
   const [data, setData] = useState<HomeData | null>(null);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
+  // Another user (or this user on another device) changed something: refetch.
+  useLiveRefresh(personId, reload);
+  const recent = useRecentlyLogged();
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const [editing, setEditing] = useState<DoseDTO | null>(null);
   const [changing, setChanging] = useState<MedicineDTO | null>(null);
@@ -407,6 +411,7 @@ export function HomeScreen() {
                 log={log}
                 timeZone={timeZone}
                 loggedBy={loggedByOther(log.id)}
+                highlight={!!log.id && recent.has(log.id)}
                 onEdit={() => dose && setEditing(dose)}
                 onMore={() => setSheet({ medicine: m, slotAt: log.slotAt ?? undefined })}
               />
@@ -433,6 +438,7 @@ export function HomeScreen() {
                   timeZone={timeZone}
                   countUncertain={profile.countUncertain}
                   lastBy={loggedByOther(last?.id)}
+                  highlight={!!last?.id && recent.has(last.id)}
                   onQuickLog={(amount) => requestLog(m, { amount, status: "taken" })}
                   onMore={() => setSheet({ medicine: m })}
                 />

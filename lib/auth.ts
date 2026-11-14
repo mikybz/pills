@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Authentik from "next-auth/providers/authentik";
 import { prisma } from "@/lib/db";
 import { ensureSelfPerson } from "@/lib/persons";
+import { cookies } from "next/headers";
 
 export const devBypass = process.env.AUTH_DEV_BYPASS === "true";
 
@@ -40,7 +41,12 @@ const DEV_USER = {
 export async function currentUser() {
   let identity: { id: string; email: string; name: string | null };
   if (devBypass) {
-    identity = DEV_USER;
+    // Dev only: a `devUser=anna` cookie signs in as a second user (to try sharing).
+    const alt = (await cookies()).get("devUser")?.value?.toLowerCase();
+    identity =
+      alt && /^[a-z]{1,20}$/.test(alt)
+        ? { id: `dev-${alt}`, email: `${alt}@localhost`, name: alt[0].toUpperCase() + alt.slice(1) }
+        : DEV_USER;
   } else {
     const session = await auth();
     if (!session?.user?.id || !session.user.email) return null;

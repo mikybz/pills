@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withUser, badRequest, notFound } from "@/lib/api";
 import { dayWindowProblem, personUpdateSchema } from "@/lib/schemas";
 import { getPersonWithAccess, hasPersonAccess, toPersonDTO } from "@/lib/persons";
+import { publish } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,6 +24,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       if (problem) return badRequest(problem);
     }
     await prisma.person.update({ where: { id }, data: parsed.data });
+    publish({ type: "person", personId: id, byUserId: user.id });
     const person = await getPersonWithAccess(id);
     return NextResponse.json(toPersonDTO(user, person!));
   });

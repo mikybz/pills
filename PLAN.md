@@ -236,7 +236,8 @@ throughout (card accent, chart series, dots).
 ## 4. Data model (Prisma / SQLite)
 
 See `prisma/schema.prisma` (source of truth). Main tables: `User` (preferences, reminder
-settings), `Person` (+ `timezone`, `wakeTime`, `bedTime`), `PersonAccess` (+ `reminders`),
+settings), `Person` (+ `timezone`, `wakeTime`, `bedTime`), `PersonAccess` (+ `reminders`,
+`notifyLogs`),
 `ShareToken`, `Medicine` (mode, doseAmount, times JSON, intervalH, startsOn/endsOn,
 remindersEnabled, `aroundTheClock`, `driftEnabled`, scheduleReviewedAt, scheduleChangedAt,
 presets, limits, form incl. `cream`, unit incl. `appl`), `ScheduleVersion` (past schedules
@@ -249,9 +250,10 @@ strings.
 - `GET/POST /api/medicines`, `PATCH/DELETE /api/medicines/:id` (delete = archive), `PUT /api/medicines/reorder`
 - `GET /api/doses?from&to&medicineId&personId` · `POST /api/doses` (optional `slotAt`; returns `{dose, check}`) · `PATCH/DELETE /api/doses/:id` (time change re-assigns `slotAt`)
 - `GET/PATCH /api/profile`
-- `GET/POST /api/persons`, `PATCH/DELETE /api/persons/:id`, `PATCH /api/persons/:id/access` (my reminders), `POST /api/persons/:id/share`, `POST /api/persons/join`, `DELETE /api/persons/:id/members/:userId`
+- `GET/POST /api/persons`, `PATCH/DELETE /api/persons/:id`, `PATCH /api/persons/:id/access` (my reminders, log notices), `POST /api/persons/:id/share`, `POST /api/persons/join`, `DELETE /api/persons/:id/members/:userId`
 - `POST /api/persons/:id/migrate` (guess schedules) · `POST /api/persons/:id/review` (confirm)
 - `GET /api/push/config` · `POST/DELETE /api/push/subscription` · `POST /api/push/test` · `POST /api/reminders/snooze`
+- `GET /api/events` (server-sent events: live changes for the user's persons)
 - `GET /api/export?format=csv|json` (incl. `slot_at`, `mode`, and missed slots as `missed` rows)
 
 ## 6. Auth
@@ -272,7 +274,7 @@ strings.
 
 - `?` in the header opens a contextual help sheet for the current screen.
 - Help sheet: getting started, today's list, late doses (drift), the double-dose check, as-needed
-  limits, reminders, "I'm not sure I took it", past doses, install-as-app.
+  limits, reminders, sharing with others, "I'm not sure I took it", past doses, install-as-app.
 - First-run onboarding: 3 short cards (add medicines → check off today's list → reminders)
   + medical disclaimer.
 
@@ -341,3 +343,37 @@ and share tracking between users.
 - Preferences (count-uncertain, reminder settings) stay per *user* (viewer). Reminders are
   opt-in per person (`PersonAccess.reminders`): on for yourself, off for others; a dose
   logged by anyone stops reminders for everyone.
+
+## Live updates & "someone else logged it" (added 2026-11-14)
+
+Two people caring for the same person or pet should never both give the dose.
+
+- **Live lists** — every open app holds one server-sent-events stream (`GET /api/events`)
+  carrying changes for all persons the user can access: doses created / edited / deleted,
+  medicines, person settings and members. Today, History and Settings refetch on any
+  change for the person on screen (debounced 250 ms), after a dropped connection, and when
+  the app comes back after more than 30 s in the background. In-process event bus
+  (`lib/live.ts`, single container); recipients are computed at publish time from
+  `PersonAccess`, so a user never hears about a person they can't access.
+- **Overlay + chime** — a dose someone else logs for the person on screen shows a short
+  note under the header for 6 s, on any tab (tap to dismiss): "Anna gave Rex Apoquel",
+  "1 tablet · 14:05". Several doses from the same person within seconds merge into one
+  note ("… Apoquel and Omega-3"); an undo takes the dose back out. The new Done row / as-
+  needed card glows briefly. A two-note Web Audio chime plays unless turned off under
+  Preferences → "Sound when someone else logs" (per device, shown only with shared
+  persons; browsers allow sound only after the first tap on the page). A dose for another
+  accessible person gives a quiet toast with **Show** (switches person).
+- **Wording** (`lib/live-text.ts`, pure, shared with the push): by whose medicine it is —
+  the logger's own ("Anna took Ibux"), the reader's own ("Anna gave you Ibux"), else
+  "Anna gave Rex Apoquel"; creams are *applied*; skipped ("Anna skipped Drops for Rex") and
+  not sure ("…, marked as not sure") have their own sentences. First names only.
+- **Push when someone else logs** — opt-in per shared person and user
+  (`PersonAccess.notifyLogs`, off by default), under Settings → Reminders → "Tell me when
+  someone else logs" (needs the global reminders switch and a subscribed device). Sent
+  10 s after the first dose (`NOTICE_DELAY_MS`, past the 8 s undo window): an undone dose
+  sends nothing; the logger's doses for that person in those 10 s are one notification in
+  the reader's language. Pending notices are lost on a restart. The service worker closes
+  reminder notifications the logged doses answered, and skips showing the notice when a
+  focused app window already showed it live (never on Safari, which revokes
+  subscriptions that receive a push without a notification).
+- Tapping a reminder or a notice opens the app on that person (`/?person=<id>`).

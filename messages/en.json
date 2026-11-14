@@ -192,6 +192,9 @@
     "perPerson": "Who to remind me about",
     "perPersonHint": "A dose logged by anyone stops the reminders for everyone.",
     "forPerson": "Reminders for {name}",
+    "notifyLogs": "Tell me when someone else logs",
+    "notifyLogsHint": "For people and pets you share: a notification when someone else gives or skips a dose.",
+    "notifyFor": "Notify me when someone else logs for {name}",
     "notConfigured": "Reminders aren't set up on the server yet.",
     "promptTitle": "Get reminders on this device?",
     "promptBody": "A heads-up before each dose, and a nudge until it's logged. Take or Snooze right from the notification.",
@@ -263,6 +266,8 @@
     "theme_dark": "Dark",
     "countUncertain": "Count \"not sure\" doses in as-needed limits",
     "countUncertainHint": "Safest is on: an unsure dose is treated as taken.",
+    "liveSound": "Sound when someone else logs",
+    "liveSoundHint": "A short chime on this device while the app is open.",
     "signOut": "Sign out",
     "help": "Help",
     "saved": "Saved"
@@ -281,6 +286,8 @@
     "asNeededBody": "Painkillers and the like have no schedule. You can set a max per day, a max per intake and a minimum time between doses. \"Per day\" counts the last 20 hours rather than 24, so getting up earlier than yesterday doesn't trigger a warning. The card shows how much you've used and when the next dose is free.",
     "remindersTitle": "Reminders",
     "remindersBody": "Turn reminders on under Settings → Reminders on each phone or computer you use. You get a heads-up before a dose, a reminder at the time, and repeats until it's logged. Tap Taken or Snooze right on the notification. For people and pets you share, each of you chooses whether to be reminded; a dose logged by anyone stops the reminders for everyone. On iPhone, reminders need the app added to the home screen.",
+    "sharedTitle": "Sharing with others",
+    "sharedBody": "When you share a person or pet, everyone sees the same list. If someone else gives a dose while you have the app open, your list updates right away with a short chime and a note like \"Anna gave Rex Apoquel\". To hear about it when the app is closed too, turn on \"Tell me when someone else logs\" under Settings → Reminders.",
     "unsureTitle": "\"Did I take it?\"",
     "unsureBody": "Open the app: today's list shows it. If you truly don't remember, log with \"Not sure I took it\" from the ⋯ button. It fills the slot, so you won't be reminded again, and it's shown faded in history.",
     "backdateTitle": "Logging past doses",
@@ -381,5 +388,18 @@
     "leave": "Leave for now",
     "apply": "Apply",
     "applied": "Schedules updated"
+  },
+  "live": {
+    "self": "{form, select, cream {{by} applied {medicine}} other {{by} took {medicine}}}",
+    "you": "{form, select, cream {{by} applied {medicine} for you} other {{by} gave you {medicine}}}",
+    "other": "{form, select, cream {{by} applied {medicine} on {person}} other {{by} gave {person} {medicine}}}",
+    "uncertainSelf": "{by} logged {medicine}, marked as not sure",
+    "uncertainYou": "{by} logged {medicine} for you, marked as not sure",
+    "uncertainOther": "{by} logged {medicine} for {person}, marked as not sure",
+    "skippedSelf": "{by} skipped {medicine}",
+    "skippedYou": "{by} skipped {medicine} for you",
+    "skippedOther": "{by} skipped {medicine} for {person}",
+    "dismiss": "Dismiss",
+    "show": "Show"
   }
 }

@@ -10,6 +10,7 @@ const SECTIONS = [
   "doubleDose",
   "asNeeded",
   "reminders",
+  "shared",
   "unsure",
   "backdate",
   "install",

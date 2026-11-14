@@ -4,6 +4,7 @@ import { withUser, badRequest, notFound, onlySent } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleDose, findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { logsAround, resolveSlot } from "@/lib/doses-server";
+import { doseChanged } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,6 +33,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       where: { id },
       data: { ...data, ...(slotAt !== undefined ? { slotAt } : {}) },
     });
+    doseChanged("updated", dose, user.id);
     return NextResponse.json(dose);
   });
 }
@@ -42,6 +44,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     const existing = await findAccessibleDose(user.id, id);
     if (!existing) return notFound();
     await prisma.doseLog.delete({ where: { id } });
+    doseChanged("deleted", existing, user.id);
     return NextResponse.json({ deleted: true });
   });
 }

@@ -103,6 +103,7 @@ export function toPersonDTO(user: User, p: NonNullable<PersonWithAccess>): Perso
     wakeTime: p.wakeTime,
     bedTime: p.bedTime,
     reminders: p.access.find((a) => a.userId === user.id)?.reminders ?? false,
+    notifyLogs: p.access.find((a) => a.userId === user.id)?.notifyLogs ?? false,
     isSelf: p.selfOfUserId === user.id,
     isOtherUsersSelf: p.selfOfUserId !== null && p.selfOfUserId !== user.id,
     canDelete: p.selfOfUserId === null && p.createdById === user.id,
