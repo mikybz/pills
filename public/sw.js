@@ -1,5 +1,6 @@
 // App-shell service worker: caches static assets (network-first for pages),
-// shows reminder notifications and handles their Taken / Snooze actions.
+// shows reminder notifications and handles their Taken / Snooze actions, and
+// shows "Anna gave Rex …" notices (kind "logged").
 // Logging always needs the network; nothing is queued offline.
 const CACHE = "pills-v2";
 const SHELL = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
@@ -43,7 +44,7 @@ self.addEventListener("push", (e) => {
   } catch {
     data = { title: "Pills", body: e.data ? e.data.text() : "" };
   }
-  e.waitUntil(
+  const show = () =>
     self.registration.showNotification(data.title || "Pills", {
       body: data.body || "",
       tag: data.tag,
@@ -52,9 +53,26 @@ self.addEventListener("push", (e) => {
       badge: "/icon-192.png",
       data: data.data || { url: "/" },
       actions: data.actions || [],
-    }),
-  );
+    });
+  e.waitUntil(data.kind === "logged" ? onLogged(data, show) : show());
 });
+
+// Safari revokes push subscriptions that receive a push without a notification.
+const mustShow = /iPhone|iPad|Macintosh/.test(self.navigator.userAgent) && !/Chrome|Chromium|Firefox|Edg\//.test(self.navigator.userAgent);
+
+/** Someone else logged a dose: close the reminders it answered, then notify. */
+async function onLogged(data, show) {
+  const logged = (data.data && data.data.logged) || [];
+  const answered = (i) => logged.some((l) => l.medicineId === i.medicineId && l.slotAt === i.slotAt);
+  for (const n of await self.registration.getNotifications()) {
+    const items = n.data && n.data.items;
+    if (Array.isArray(items) && items.length && items.every(answered)) n.close();
+  }
+  // An open, focused app already showed it live (overlay + chime).
+  const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  if (!mustShow && wins.some((w) => w.focused && w.visibilityState === "visible")) return;
+  await show();
+}
 
 async function openApp(url = "/") {
   const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

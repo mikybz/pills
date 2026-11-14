@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PersonIcon, usePersons } from "@/components/person-context";
+import { PersonIcon, isShared, usePersons } from "@/components/person-context";
 import { api } from "@/lib/client";
 import { formatDuration } from "@/lib/format";
 import { usePushSupport, useDevicePush } from "@/lib/push-client";
@@ -56,15 +56,16 @@ export function RemindersSection({
     }
   }
 
-  async function setPersonReminders(personId: string, on: boolean) {
+  async function setAccess(personId: string, patch: { reminders?: boolean; notifyLogs?: boolean }) {
     await run(async () => {
       await api(`/api/persons/${encodeURIComponent(personId)}/access`, {
         method: "PATCH",
-        body: JSON.stringify({ reminders: on }),
+        body: JSON.stringify(patch),
       });
       await reload();
     });
   }
+  const shared = persons.filter(isShared);
 
   const choice = (label: string, value: number, options: number[], key: keyof ProfileDTO) => (
     <div className="flex items-center justify-between gap-4">
@@ -174,12 +175,38 @@ export function RemindersSection({
                       checked={p.reminders}
                       disabled={busy}
                       aria-label={t("reminders.forPerson", { name: p.name })}
-                      onCheckedChange={(v) => setPersonReminders(p.id, v)}
+                      onCheckedChange={(v) => setAccess(p.id, { reminders: v })}
                     />
                   </li>
                 ))}
               </ul>
             </div>
+
+            {shared.length > 0 && (
+              <div className="space-y-2 border-t pt-4">
+                <div>
+                  <Label>{t("reminders.notifyLogs")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("reminders.notifyLogsHint")}</p>
+                </div>
+                <ul className="space-y-2">
+                  {shared.map((p) => (
+                    <li key={p.id} className="flex items-center gap-2">
+                      <PersonIcon kind={p.kind} className="text-muted-foreground" />
+                      <span className="flex-1 truncate text-sm">
+                        {p.name}
+                        {p.isSelf && <span className="text-muted-foreground"> ({t("people.you")})</span>}
+                      </span>
+                      <Switch
+                        checked={p.notifyLogs}
+                        disabled={busy}
+                        aria-label={t("reminders.notifyFor", { name: p.name })}
+                        onCheckedChange={(v) => setAccess(p.id, { notifyLogs: v })}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
       </Card>

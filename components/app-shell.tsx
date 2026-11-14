@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Check, ChevronDown, CircleHelp, ClipboardList, History, Pill, Settings, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HelpSheet } from "@/components/help-sheet";
+import { LiveProvider } from "@/components/live-provider";
 import { useEffect, useState } from "react";
 import { syncPushSubscription } from "@/lib/push-client";
 import { useRouter } from "next/navigation";
@@ -29,7 +30,9 @@ import {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <PersonProvider>
-      <Shell>{children}</Shell>
+      <LiveProvider>
+        <Shell>{children}</Shell>
+      </LiveProvider>
     </PersonProvider>
   );
 }
