@@ -73,7 +73,12 @@ export interface PersonDTO {
   members: PersonMember[];
 }
 
-export type ProfileDTO = Omit<User, "createdAt"> & { createdAt: string };
+export type ProfileDTO = Omit<User, "createdAt" | "blockedAt" | "lastSeenAt"> & {
+  createdAt: string;
+  blockedAt: string | null;
+  lastSeenAt: string | null;
+  isAdmin: boolean;
+};
 
 export type LogResponse = { dose: DoseDTO; check: CheckResult };
 

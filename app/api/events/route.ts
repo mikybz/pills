@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { subscribe } from "@/lib/live";
+import { prisma } from "@/lib/db";
 
 /** Comment line every 25 s so proxies and phones keep the connection open. */
 const HEARTBEAT_MS = 25_000;
@@ -28,7 +29,16 @@ export async function GET(req: NextRequest) {
       // Tell EventSource to wait 3 s before reconnecting after a drop.
       send("retry: 3000\n: connected\n\n");
       const unsubscribe = subscribe(user.id, (event) => send(`data: ${JSON.stringify(event)}\n\n`));
-      const heartbeat = setInterval(() => send(": ping\n\n"), HEARTBEAT_MS);
+      const heartbeat = setInterval(() => {
+        send(": ping\n\n");
+        // A user an admin blocked loses the stream (the reconnect is then refused).
+        prisma.user
+          .findUnique({ where: { id: user.id }, select: { blockedAt: true } })
+          .then((u) => {
+            if (!u || (u.blockedAt && !user.idpAdmin)) cleanup();
+          })
+          .catch(() => {});
+      }, HEARTBEAT_MS);
       cleanup = () => {
         clearInterval(heartbeat);
         unsubscribe();

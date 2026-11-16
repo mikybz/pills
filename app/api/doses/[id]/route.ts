@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound, onlySent } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound, onlySent } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleDose, findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { logsAround, resolveSlot } from "@/lib/doses-server";
@@ -13,7 +13,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return withUser(async (user) => {
     const existing = await findAccessibleDose(user.id, id);
     if (!existing) return notFound();
-    const body = await req.json();
+    const body = await readJson(req);
     const parsed = doseSchema.partial().omit({ medicineId: true }).safeParse(body);
     if (!parsed.success) return badRequest(parsed.error.message);
     const { slotAt: requested, ...data } = onlySent(parsed.data, body);

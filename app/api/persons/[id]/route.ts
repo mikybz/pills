@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound } from "@/lib/api";
 import { dayWindowProblem, personUpdateSchema } from "@/lib/schemas";
 import { getPersonWithAccess, hasPersonAccess, toPersonDTO } from "@/lib/persons";
 import { publish } from "@/lib/live";
@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   return withUser(async (user) => {
     if (!(await hasPersonAccess(user.id, id))) return notFound();
-    const parsed = personUpdateSchema.safeParse(await req.json());
+    const parsed = personUpdateSchema.safeParse(await readJson(req));
     if (!parsed.success) return badRequest(parsed.error.message);
     if (parsed.data.wakeTime || parsed.data.bedTime) {
       const existing = await prisma.person.findUnique({ where: { id } });

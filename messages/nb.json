@@ -401,5 +401,34 @@
     "skippedOther": "{by} hoppet over {medicine} for {person}",
     "dismiss": "Lukk",
     "show": "Vis"
+  },
+  "gate": {
+    "title": "Pills",
+    "signups_closed": "Pills tar ikke imot nye brukere akkurat nå. Prøv igjen senere.",
+    "full": "Pills har nådd grensen for nye brukere inntil videre. Prøv igjen senere.",
+    "removed": "Tilgangen din til Pills er fjernet av administratoren.",
+    "email_taken": "En annen konto med denne e-postadressen bruker allerede Pills. Logg inn med den kontoen i stedet.",
+    "otherAccount": "Bruk en annen konto"
+  },
+  "admin": {
+    "title": "Admin",
+    "back": "Innstillinger",
+    "signups": "Nye brukere kan registrere seg",
+    "signupsOpenHint": "Alle med en konto kan begynne å bruke Pills.",
+    "signupsClosedHint": "Bare eksisterende brukere, husstanden og administratorer slipper inn.",
+    "count": "{count} av maks {max} brukere",
+    "users": "Brukere",
+    "blocked": "Blokkert",
+    "you": "deg",
+    "joined": "ble med {when}",
+    "seen": "sist sett {when}",
+    "admin": "admin",
+    "adminIdp": "admin (Authentik)",
+    "member": "medlem",
+    "makeAdmin": "Gjør til admin",
+    "unmakeAdmin": "Fjern admin",
+    "block": "Blokker",
+    "blockConfirm": "Blokkere {name}? De mister tilgangen og får ingen flere påminnelser. Loggede doser blir liggende.",
+    "allowAgain": "Slipp inn igjen"
   }
 }

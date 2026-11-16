@@ -22,6 +22,13 @@ model User {
   defaultPersonId String?
   defaultPerson   Person?    @relation("DefaultPerson", fields: [defaultPersonId], references: [id], onDelete: SetNull)
   createdAt      DateTime   @default(now())
+  /// "admin" | "member". Members of the Authentik group `admins` are admin regardless.
+  role           String     @default("member")
+  /// In the Authentik `admins` group at the last request (shown as "admin (Authentik)").
+  idpAdmin       Boolean    @default(false)
+  /// Set by an admin: refused on every request until allowed again.
+  blockedAt      DateTime?
+  lastSeenAt     DateTime?
   doses          DoseLog[]
   selfPerson     Person?    @relation("SelfPerson")
   createdPersons Person[]   @relation("CreatedPersons")
@@ -184,4 +191,10 @@ model ReminderLog {
 
   @@unique([medicineId, slotAt, userId, kind, seq])
   @@index([sentAt])
+}
+
+/// Admin-set globals, e.g. `signupsOpen` ("true" | "false"; missing = closed).
+model AppSetting {
+  key   String @id
+  value String
 }

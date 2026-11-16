@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound, tooMany } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import { resolvePersonId } from "@/lib/persons";
 import { medicineSchema, scheduleProblem } from "@/lib/schemas";
 import { toMedicineData } from "@/lib/medicines-server";
@@ -25,12 +26,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const parsed = medicineSchema.safeParse(await req.json());
+    const parsed = medicineSchema.safeParse(await readJson(req));
     if (!parsed.success) return badRequest(parsed.error.message);
     const problem = scheduleProblem(parsed.data);
     if (problem) return badRequest(problem);
     const personId = await resolvePersonId(user, parsed.data.personId);
     if (!personId) return notFound();
+    if ((await prisma.medicine.count({ where: { personId } })) >= LIMITS.medicinesPerPerson) return tooMany();
     // New medicines go to the end of the list.
     const last = await prisma.medicine.aggregate({ where: { personId }, _max: { sortOrder: true } });
     const medicine = await prisma.medicine.create({

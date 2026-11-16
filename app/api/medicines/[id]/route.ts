@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound, onlySent } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound, onlySent } from "@/lib/api";
 import { medicineSchema, scheduleProblem } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { scheduleChanged, toMedicineData } from "@/lib/medicines-server";
@@ -14,7 +14,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return withUser(async (user) => {
     const existing = await findAccessibleMedicineWithPerson(user.id, id);
     if (!existing) return notFound();
-    const body = await req.json();
+    const body = (await readJson(req)) as Record<string, unknown> | undefined;
     const parsed = medicineSchema.partial().omit({ personId: true }).safeParse(body);
     if (!parsed.success) return badRequest(parsed.error.message);
     const sent = onlySent(parsed.data, body);
@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     const now = new Date();
     // Saving the form confirms a migrated (guessed) schedule.
-    const confirming = body.confirmSchedule === true && !existing.scheduleReviewedAt;
+    const confirming = body?.confirmSchedule === true && !existing.scheduleReviewedAt;
     const changed = scheduleChanged(existing, data);
     const from = currentScheduleFrom(existing);
 
@@ -62,7 +62,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           ...data,
           ...(changed && from !== null ? { scheduleChangedAt: now } : {}),
           ...(confirming ? { scheduleReviewedAt: now } : {}),
-          ...(body.unarchive ? { archivedAt: null } : {}),
+          ...(body?.unarchive ? { archivedAt: null } : {}),
         },
       });
     });

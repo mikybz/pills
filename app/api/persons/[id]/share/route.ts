@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, notFound } from "@/lib/api";
+import { withUser, notFound, tooMany } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import {
   SHARE_TOKEN_TTL_MS,
   generateShareCode,
@@ -21,6 +22,8 @@ export async function POST(_req: NextRequest, { params }: Params) {
     await prisma.shareToken.deleteMany({
       where: { OR: [{ expiresAt: { lt: new Date() } }, { usedAt: { not: null } }] },
     });
+    const open = await prisma.shareToken.count({ where: { personId: id } });
+    if (open >= LIMITS.openShareCodesPerPerson) return tooMany();
     await prisma.shareToken.create({
       data: { tokenHash: hashShareCode(code), personId: id, createdById: user.id, expiresAt },
     });
