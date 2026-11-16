@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound, tooMany } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson, resolvePersonId } from "@/lib/persons";
 import { checkFor, logsAround, resolveSlot } from "@/lib/doses-server";
@@ -34,12 +35,16 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const parsed = doseSchema.safeParse(await req.json());
+    const parsed = doseSchema.safeParse(await readJson(req));
     if (!parsed.success) return badRequest(parsed.error.message);
     const { medicineId, amount, takenAt, slotAt: requested, status, note } = parsed.data;
 
     const medicine = await findAccessibleMedicineWithPerson(user.id, medicineId);
     if (!medicine) return notFound();
+    const loggedToday = await prisma.doseLog.count({
+      where: { userId: user.id, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+    if (loggedToday >= LIMITS.dosesPerUserPerDay) return tooMany();
 
     const when = takenAt ?? new Date();
     const logs = await logsAround(medicine, when.getTime());

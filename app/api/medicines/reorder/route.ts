@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest } from "@/lib/api";
+import { withUser, readJson, badRequest } from "@/lib/api";
 import { publish } from "@/lib/live";
 
 const reorderSchema = z.object({ ids: z.array(z.string().min(1)).min(1) });
 
 export async function PUT(req: NextRequest) {
   return withUser(async (user) => {
-    const parsed = reorderSchema.safeParse(await req.json());
+    const parsed = reorderSchema.safeParse(await readJson(req));
     if (!parsed.success) return badRequest(parsed.error.message);
     const { ids } = parsed.data;
     // All ids must belong to one person the user can access.

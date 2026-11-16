@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
@@ -12,6 +13,7 @@ import {
   LogOut,
   Pencil,
   Plus,
+  Shield,
   Sun,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -315,11 +317,20 @@ export function SettingsScreen() {
           >
             <CircleHelp className="size-4 text-muted-foreground" /> {t("settings.help")}
           </button>
+          {profile.isAdmin && (
+            <Link
+              href="/admin"
+              className="flex w-full items-center gap-3 border-t px-4 py-3 text-left hover:bg-accent/50"
+            >
+              <Shield className="size-4 text-muted-foreground" /> {t("admin.title")}
+            </Link>
+          )}
           <button
             type="button"
             className="flex w-full items-center gap-3 border-t px-4 py-3 text-left hover:bg-accent/50"
             onClick={() => {
-              window.location.href = "/api/auth/signout";
+              // Signs out of pills and Authentik (route handler, not a page).
+              window.location.href = "/logout";
             }}
           >
             <LogOut className="size-4 text-muted-foreground" /> {t("settings.signOut")}

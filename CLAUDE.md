@@ -10,7 +10,7 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 - `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login; a
   `devUser=anna` cookie then signs that browser in as a second user, for sharing)
 - `npm run build` / `npm run lint`
-- `npx vitest run` — unit tests (schedule, day window, drift, dose check, migration guess,
+- `npx vitest run` — unit tests (access gate, schedule, day window, drift, dose check, migration guess,
   timezone math, reminder text, live text)
 - `npx prisma migrate dev` — apply/create migrations (SQLite)
 
@@ -47,7 +47,7 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   `public/sw.js` shows notifications and handles Taken / Snooze. Notification text is
   i18n'd server-side via `lib/reminder-text.ts` (verb by form: creams are "applied").
 - **Live updates** — `lib/live.ts` (I/O): in-process event bus on `globalThis` →
-  `GET /api/events` (SSE, 25 s heartbeat). Write routes call `publish()` / `doseCreated()` /
+  `GET /api/events` (SSE, 25 s heartbeat; re-checks the user isn't blocked). Write routes call `publish()` / `doseCreated()` /
   `doseChanged()` after the write (fire-and-forget); recipients come from `PersonAccess`.
   Client: `components/live-provider.tsx` (one EventSource, overlay + chime from
   `lib/chime.ts`); screens refetch via `useLiveRefresh(personId, reload)`. A new dose also
@@ -60,8 +60,19 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   zod's `.partial()` still applies `.default()`s and would reset untouched fields. Zod schemas in `lib/schemas.ts`. `Medicine.presets`/`times` are
   JSON strings (SQLite has no JSON column type). A schedule edit stores the old one as a
   `ScheduleVersion` and sets `scheduleChangedAt` so history keeps past missed slots.
-- **Auth** — Auth.js v5 in `lib/auth.ts`: Authentik OIDC in production, `AUTH_DEV_BYPASS`
-  dev user locally. `currentUser()` upserts the DB user; page guard in `app/(app)/layout.tsx`.
+- **Auth & access** — Auth.js v5 in `lib/auth.ts`: Authentik OIDC in production, `AUTH_DEV_BYPASS`
+  dev user locally (in `admins` + `household`; `devUser=<name>` cookie = a user with no groups).
+  `access()` is the gate (pure rules in `lib/access-rules.ts`): users keyed on `sub` only,
+  sign-ups switch (`AppSetting signupsOpen`), Authentik groups `admins` (always admin) and
+  `household` (always let in), blocked users, flood caps. `withUser()` runs it for every API
+  route (plus the per-user rate limit), `withAdmin()` for `/api/admin/*`; the page guard in
+  `app/(app)/layout.tsx` shows `GateNotice` when refused. Roles live in the app
+  (`User.role`), managed on `/admin`. No login page: `/login` and `/logout` are route
+  handlers (Authentik login / end-session). Groups come from the token's `groups` claim,
+  copied into the JWT at sign-in.
+- **Limits** — `lib/limits.ts`: every create route checks its cap and returns `tooMany()`
+  (429 `limit`); read bodies with `readJson(req)` (64 KB cap), never `req.json()`. A new
+  create route needs a cap too.
 - **UI** — screens are client components in `components/*-screen.tsx`, thin server pages in
   `app/(app)/`. Home = today's checklist (`lib/checklist.ts`), re-evaluated every minute
   via `useNow()`. Logging goes through `useDoseLogger` (check → confirm sheet → POST →

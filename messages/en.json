@@ -401,5 +401,34 @@
     "skippedOther": "{by} skipped {medicine} for {person}",
     "dismiss": "Dismiss",
     "show": "Show"
+  },
+  "gate": {
+    "title": "Pills",
+    "signups_closed": "Pills isn't taking new users right now. Please try again later.",
+    "full": "Pills has reached its limit for new users for now. Please try again later.",
+    "removed": "Your access to Pills has been removed by the admin.",
+    "email_taken": "Another account with this email address already uses Pills. Sign in with that account instead.",
+    "otherAccount": "Use another account"
+  },
+  "admin": {
+    "title": "Admin",
+    "back": "Settings",
+    "signups": "New users can sign up",
+    "signupsOpenHint": "Anyone with an account can start using Pills.",
+    "signupsClosedHint": "Only existing users, household and admins get in.",
+    "count": "{count} of max {max} users",
+    "users": "Users",
+    "blocked": "Blocked",
+    "you": "you",
+    "joined": "joined {when}",
+    "seen": "seen {when}",
+    "admin": "admin",
+    "adminIdp": "admin (Authentik)",
+    "member": "member",
+    "makeAdmin": "Make admin",
+    "unmakeAdmin": "Remove admin",
+    "block": "Block",
+    "blockConfirm": "Block {name}? They lose access and get no more reminders. Their logged doses stay.",
+    "allowAgain": "Allow again"
   }
 }

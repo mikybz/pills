@@ -119,3 +119,9 @@ export const snoozeSchema = z.object({
     .min(1)
     .max(20),
 });
+
+export const adminUserSchema = z
+  .object({ role: z.enum(["admin", "member"]).optional(), blocked: z.boolean().optional() })
+  .refine((v) => v.role !== undefined || v.blocked !== undefined, "nothing to change");
+
+export const adminSettingsSchema = z.object({ signupsOpen: z.boolean() });

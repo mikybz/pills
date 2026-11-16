@@ -253,16 +253,34 @@ strings.
 - `GET/POST /api/persons`, `PATCH/DELETE /api/persons/:id`, `PATCH /api/persons/:id/access` (my reminders, log notices), `POST /api/persons/:id/share`, `POST /api/persons/join`, `DELETE /api/persons/:id/members/:userId`
 - `POST /api/persons/:id/migrate` (guess schedules) · `POST /api/persons/:id/review` (confirm)
 - `GET /api/push/config` · `POST/DELETE /api/push/subscription` · `POST /api/push/test` · `POST /api/reminders/snooze`
-- `GET /api/events` (server-sent events: live changes for the user's persons)
+- `GET /api/events` (server-sent events: live changes for the user's persons; a blocked user's stream closes at the next heartbeat)
+- Admin only: `GET /api/admin/users` (users + `signupsOpen`), `PATCH /api/admin/users/:id` (`{role?, blocked?}`), `PATCH /api/admin/settings` (`{signupsOpen}`)
+- `GET /login?next=` (→ Authentik), `GET /logout` (→ Authentik end-session); route handlers, not pages
 - `GET /api/export?format=csv|json` (incl. `slot_at`, `mode`, and missed slots as `missed` rows)
 
 ## 6. Auth
 
 - **Auth.js (NextAuth v5)** with a generic OIDC provider pointed at Authentik
   (`AUTH_AUTHENTIK_ISSUER`, `AUTH_AUTHENTIK_ID`, `AUTH_AUTHENTIK_SECRET`).
-- User row auto-created on first login from the OIDC profile (email/name/sub).
-- `AUTH_DEV_BYPASS=true` env for local dev → fixed dev user, no IdP needed.
-- Middleware protects everything except `/api/health` and static assets.
+- No login page in the app: signed out → `/login` → straight to Authentik's one login page
+  (password or Google). Sign out (`/logout`) ends the Authentik session too.
+- **Access gate** (added 2026-11-16, the standard for all of mikael's apps): Authentik has no
+  group binding for pills; `access()` decides on every request. Users are keyed on the OIDC
+  `sub` only. A new user gets in when sign-ups are open (pills starts **open**), or always
+  when in the Authentik group `household` or `admins`. Otherwise they see a "not taking new
+  users" page with "Use another account". Blocked users see "access removed".
+- **Roles live in pills**: `User.role` `admin | member`. Members of the Authentik group
+  `admins` are admin regardless (`User.idpAdmin`, refreshed per request) and can't be
+  demoted or blocked in the app. Admins use **Settings → Admin** (`/admin`): sign-ups
+  open/closed, user list (joined, last seen), make/remove admin, block / allow again.
+  Blocking deletes the user's push subscriptions; their logged doses stay. Nobody can
+  demote or block themselves.
+- **Flood limits** (`lib/limits.ts`, 429 `limit`): max users in total and new users per
+  24 h (then "try later", household included), persons per creator, medicines per person,
+  doses per user per 24 h, open share codes per person, push subscriptions per user
+  (oldest dropped), API requests per user per minute, share-code attempts, 64 KB JSON bodies.
+- `AUTH_DEV_BYPASS=true` env for local dev → dev user (in `admins` + `household`); a
+  `devUser=<name>` cookie is a second user with no groups (to try sharing and the gate).
 
 ## 7. i18n
 

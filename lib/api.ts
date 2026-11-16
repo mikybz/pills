@@ -1,15 +1,43 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
-import type { User } from "@prisma/client";
+import { access, type AppUser } from "@/lib/auth";
+import { LIMITS } from "@/lib/limits";
+import { allow } from "@/lib/rate-limit";
 
+/** Runs the access gate; every API route goes through this (or withAdmin). */
 export async function withUser(
-  handler: (user: User) => Promise<NextResponse>,
+  handler: (user: AppUser) => Promise<NextResponse>,
 ): Promise<NextResponse> {
-  const user = await currentUser();
-  if (!user) {
+  const a = await access();
+  if (a.kind === "anonymous") {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  return handler(user);
+  if (a.kind !== "ok") return NextResponse.json({ error: a.kind }, { status: 403 });
+  if (!allow(`api:${a.user.id}`, LIMITS.requestsPerMinute, 60_000)) return tooMany();
+  return handler(a.user);
+}
+
+export async function withAdmin(
+  handler: (user: AppUser) => Promise<NextResponse>,
+): Promise<NextResponse> {
+  return withUser(async (user) =>
+    user.isAdmin ? handler(user) : NextResponse.json({ error: "forbidden" }, { status: 403 }),
+  );
+}
+
+/**
+ * The request's JSON body, or undefined when it's too big or not JSON (zod then
+ * rejects it with a 400).
+ */
+export async function readJson(req: Request): Promise<unknown> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > LIMITS.maxBodyBytes) return undefined;
+  const text = await req.text().catch(() => "");
+  if (text.length > LIMITS.maxBodyBytes) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -29,4 +57,9 @@ export function badRequest(message: string) {
 
 export function notFound() {
   return NextResponse.json({ error: "not found" }, { status: 404 });
+}
+
+/** A flood limit was hit (LIMITS). The client shows a "limit reached" message. */
+export function tooMany() {
+  return NextResponse.json({ error: "limit" }, { status: 429 });
 }

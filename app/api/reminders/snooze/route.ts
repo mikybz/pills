@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { withUser, badRequest, notFound } from "@/lib/api";
+import { withUser, readJson, badRequest, notFound } from "@/lib/api";
 import { snoozeSchema } from "@/lib/schemas";
 import { findAccessibleMedicine } from "@/lib/persons";
 import { SNOOZE_MS } from "@/lib/reminders";
@@ -11,7 +11,7 @@ import { SNOOZE_MS } from "@/lib/reminders";
  */
 export async function POST(req: NextRequest) {
   return withUser(async (user) => {
-    const parsed = snoozeSchema.safeParse(await req.json());
+    const parsed = snoozeSchema.safeParse(await readJson(req));
     if (!parsed.success) return badRequest(parsed.error.message);
     const until = new Date(Date.now() + SNOOZE_MS);
     for (const { medicineId, slotAt } of parsed.data.items) {
