@@ -25,8 +25,14 @@ export function pushConfigured(): boolean {
 }
 
 export interface PushPayload {
-  /** "logged" = someone else logged a dose (see `lib/live.ts`); reminders leave it out. */
-  kind?: "logged";
+  /**
+   * "logged" = someone else logged a dose (see `lib/live.ts`). "close" / "update" =
+   * the person's reminder notification is answered / changed: the service worker
+   * closes it or replaces it in place, never raises a new one. Reminders leave it out.
+   */
+  kind?: "logged" | "close" | "update";
+  /** No sound or vibration (used when replacing a notification in place). */
+  silent?: boolean;
   title: string;
   body: string;
   tag: string;

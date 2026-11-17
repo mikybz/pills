@@ -5,8 +5,8 @@ A super-simple, installable web app that reminds you to take your medicine and r
 
 English + Norwegian · PWA (install on phone/PC) · schedules & web-push reminders · history & statistics · Authentik SSO.
 
-See [PLAN.md](PLAN.md) for the product design (scheduling model, dose check, reminders) and
-[REWRITE.md](REWRITE.md) for the reasoning behind the schedule/reminder rewrite.
+See [PLAN.md](PLAN.md) for the product design (scheduling model, dose check, reminders,
+settled decisions).
 
 ## Features
 

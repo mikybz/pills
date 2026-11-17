@@ -1,5 +1,5 @@
 /**
- * Pure: today's checklist for one person (REWRITE.md §5.1). Built from the same
+ * Pure: today's checklist for one person (PLAN.md §1.1). Built from the same
  * schedule functions the server and the reminder tick use.
  */
 import {

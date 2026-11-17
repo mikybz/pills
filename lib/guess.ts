@@ -1,5 +1,5 @@
 /**
- * Pure schedule guess for medicines that predate schedules (REWRITE.md §8).
+ * Pure schedule guess for medicines that predate schedules (PLAN.md §13).
  * The result is reviewed by the user before any reminder or missed dose is derived.
  */
 import { DEFAULT_TIMES, DAY, isTakenStatus, timeOf, type DoseStatus, type Mode } from "./schedule";

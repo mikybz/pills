@@ -11,9 +11,10 @@ deployed on valensendstad.no behind Authentik SSO.
 
 ## 1. Core user flows
 
-> Sections 1.1–1.3, 1.5 and 2 were rewritten on 2026-11-12 (schedules + reminders). The
-> design notes behind them are in REWRITE.md. On 2026-11-13 they gained the day window,
-> late-dose drift, earlier doses and creams (§1.1, §1.2, §1.5, §2.2, §2.3, §2.7).
+> Sections 1.1–1.3, 1.5 and 2 were rewritten on 2026-11-12 (schedules + reminders; the
+> settled decisions and the migration of old medicines are §12 and §13). On 2026-11-13 they
+> gained the day window, late-dose drift, earlier doses and creams (§1.1, §1.2, §1.5, §2.2,
+> §2.3, §2.7).
 
 ### 1.1 Today's checklist (home)
 The home screen is a checklist for today, ordered by time:
@@ -158,8 +159,20 @@ but is effective (row, reminders) at the next wake time.
   (15) until `nagMaxMin` (120) or the cutoff. Uses the effective (drifted / pushed /
   morning) time. Creams read "Time to apply …" / "Smør på …" with an **Applied** action.
 - Nothing once the slot has any log by anyone. Same person + same instant ⇒ one
-  notification (tag `personId:slotAt`). Other people / pets are prefixed ("Rex: …"). Text
-  in the receiving user's language.
+  notification **per person** (tag `reminders:<personId>`): each reminder lists every slot
+  of that person still unanswered and replaces the last one, never stacking. One due
+  instant reads as a sentence, several as one line per instant ("08:00 Ibux, 1 tablet").
+  Other people / pets are prefixed ("Rex: …") or, with several instants, are the title.
+  Text in the receiving user's language.
+- **Kept in step with the doses** (`syncReminderNotifications`, 10 s after a dose is
+  logged, edited or undone, so the undo window passes first): to each user who was sent a
+  reminder for that person in the last day, a `close` push when nothing is open any more
+  (answered in the app, on another device, or by someone else, whether or not they opted
+  into "tell me when…"), or a quiet `update` push with the remaining slots. The service
+  worker replaces or closes the notification by tag; if there is none (the user swiped it
+  away) it shows a silent one and closes it at once, because browsers want every push to
+  show something. An update never brings a dismissed notification back. Logging in the
+  app also closes this device's notifications immediately (`closeStaleNotifications`).
 - Actions: **Taken** (SW posts the dose; on failure opens the app — nothing is queued),
   **Snooze 30 min** (per user; one more reminder when it ends). iOS shows no actions.
 - Engine: 60 s tick from `instrumentation.ts`; each send first inserts a `ReminderLog` row
@@ -325,7 +338,7 @@ on weekends · moving times on a time-zone change · offline logging queue · mu
 (carer logs for family member) · medication stock/refill tracking · doctor report PDF ·
 Apple/Google Health export · med interaction warnings · widgets.
 
-## 11. Implementation steps (each = commit)
+## 11. Implementation steps (each = commit; all done)
 
 1. `PLAN.md` (this file).
 2. Scaffold: Next.js App Router + TS + Tailwind + shadcn/ui + base layout/theme.
@@ -407,3 +420,116 @@ Two people caring for the same person or pet should never both give the dose.
   focused app window already showed it live (never on Safari, which revokes
   subscriptions that receive a push without a notification).
 - Tapping a reminder or a notice opens the app on that person (`/?person=<id>`).
+
+---
+
+## 12. Settled decisions of the schedules and reminders rewrite (2026-11-12)
+
+The first release of the schedule model was written from a separate design note
+(a separate note, now folded in here). The product owner settled these; do not reopen them.
+
+The app is meant to help people remember their medicine, including people who forget
+easily (ADHD). Before the rewrite it modelled every medicine as "as needed, with a daily
+maximum", so "once a day", "every 12 h" or "every 8 h" could not be entered and the
+safety model warned falsely (85 % of a daily max of 1, a rolling 24 h sum that counted
+yesterday's dose, "next OK" computed from the daily max). Hence the three modes and the
+slot model in §2.
+
+These were settled with the product owner. Do not reopen them during implementation.
+
+1. **Three timing modes per medicine**: fixed times, interval, as needed (§2).
+2. **Late doses in fixed mode do not move the schedule.** The next dose is pushed only
+   when it would otherwise come unsafely soon, and only that one dose (§2.2).
+3. **Scheduled medicines warn only about likely double doses.** No daily-max math, no
+   85 % rule, no linear formula.
+4. **As-needed medicines** keep a max per day and minimum gap. "Per day" is a rolling
+   window with slack, because wake-up times vary by hours from day to day (§2.1).
+5. **Home screen is a checklist for today**, ordered by time (§1.1).
+6. **Unlogged doses become overdue, then missed** automatically (§2.2).
+7. **Reminders by web push**: a heads-up before, one at dose time, repeats until logged,
+   and Take / Snooze buttons on the notification (§2.5).
+8. **Repeat defaults**: heads-up 10 min before, repeat every 15 min, stop after 2 h.
+9. **No quiet hours.** The app points out night-time doses when the schedule is set up.
+10. **Reminder settings**: global defaults per user, plus an on/off switch per medicine.
+11. **Shared persons**: each user opts in to reminders per person. Default on for
+    yourself, off for others. A dose logged by anyone stops reminders for everyone.
+12. **Course length**: a medicine can have an end date ("for 7 days").
+13. **Simple-first add flow**: name and "how often?", everything else optional.
+14. **24-hour clock everywhere, in every locale. Never AM/PM.**
+15. **Migration**: existing medicines get an auto-guessed schedule that the user reviews
+    (§13).
+16. **No dead settings**: on a device that cannot show notifications, reminder settings
+    are hidden except one global on/off switch (§3).
+
+Out of scope for this release: different dose amounts per slot, weekday or every-N-days
+schedules, quiet hours, offline logging, stock and refill tracking. The data model in
+§4 should not make these hard to add later, but build none of them.
+
+---
+
+## 13. Migration of pre-rewrite medicines
+
+Auto-guess, then review. Guessing needs each person's timezone and their log history,
+so it runs in application code, not in the SQL migration.
+
+**SQL migration**: add the columns and tables from §4, drop `strictness`,
+`wakeWindowH` and `scheduleHints`, set `PersonAccess.reminders = true` for self persons.
+All existing medicines have `mode = null`. The entrypoint already snapshots the database
+before `migrate deploy`.
+
+**Guess**, run by `POST /api/persons/:id/migrate` with the client's timezone, called by
+the client when it loads a person that has a medicine with `mode = null`. It is
+idempotent and only touches medicines whose mode is still null. For each such medicine:
+
+1. `doseAmount` = `defaultPreset`, else the first preset.
+2. Take the taken and uncertain logs of the last 14 days, in local time.
+3. Expected doses per day `n` = `maxPerDay / (maxPerIntake ?? doseAmount)`, rounded,
+   when `maxPerDay` is set; otherwise the median number of doses on days with any dose.
+4. **As needed** when there are fewer than 5 logs in the 14 days, or `n` is not 1–4, or
+   the average is below 0.7 × `n` doses per day. Keep all limits.
+5. Otherwise **fixed**: group the times of day into `n` clusters and round each cluster
+   median to the nearest 30 minutes. If a cluster spreads more than ±90 minutes, use the
+   default times from §1.5 for that `n` instead.
+6. Never guess interval mode. The user can choose it in review.
+7. Leave `scheduleReviewedAt` null. Archived medicines become `asNeeded`, already
+   reviewed.
+
+**Review**: while a person has medicines without `scheduleReviewedAt`, the home screen
+shows a one-time review screen first: each medicine with its guess in words ("Medicine
+B: twice a day, 08:00 and 20:00"), with **Looks right** and **Change** (opens the edit
+form). "Confirm all" is available. Confirming sets `scheduleReviewedAt`. The review can
+be closed and comes back as a banner until done.
+
+Until a medicine is reviewed it appears in the checklist with its guessed schedule, but
+it sends no reminders and derives no missed slots. This keeps a wrong guess from
+producing wrong notifications. Existing dose logs keep `slotAt = null`.
+
+The first user to open a shared person runs the guess and may do the review; the result
+applies to everyone with access.
+
+The code is `lib/guess.ts` (pure, tested in `lib/guess.test.ts`) and
+`POST /api/persons/:id/migrate`.
+
+---
+
+## 14. Verification still open, and details left to the implementer
+
+**Real-device checks** (not yet done; local tests cannot cover them). On an iPhone
+(installed to the home screen) and on Android or desktop:
+1. Subscribe, send the test notification, get a real heads-up and a due reminder.
+2. Taken from the notification (Android / desktop; iOS shows no actions) and the app
+   shows it; the creams' "Apply" wording; Taken on a drifted slot.
+3. Log a dose in the app, on another device and as another user: the notification on the
+   phone goes away (or shrinks to the slots still open) within about 15 s, with no extra
+   alert. On iOS, check whether a notification can be closed from a push at all; if not,
+   it stays until swiped.
+4. Two slots open at once for one person: one notification with two lines, replaced by
+   each new reminder.
+5. Tapping a notification opens the app on that person.
+6. With a live signed-in session through the proxy: `/api/events` stream, `groups` claim
+   (akadmin shows as admin), an open tab reloading after a deploy.
+
+**Left to the implementer:** layout and wording of rows, review screen and confirm sheet;
+whether "taken early" needs a limit on how far ahead a slot can be filled (suggested: the
+next slot only); snooze length is fixed at 30 minutes; whether `GET /api/safety/:id`
+survives in reduced form.

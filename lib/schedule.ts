@@ -455,6 +455,8 @@ export interface ReminderEvent {
   kind: ReminderKind;
   seq: number;
   at: number;
+  /** The slot can no longer be answered from here on (next slot's window). */
+  cutoff: number;
 }
 
 /** A reminder at the end of a snooze is a "nag" with seq SNOOZE_SEQ_BASE + snooze seq. */
@@ -499,7 +501,7 @@ export function reminderEvents(args: {
     const mine = snoozes.filter((z) => z.slotAt === slot.slotAt);
     const candidates: ReminderEvent[] = [];
     const push = (kind: ReminderKind, seq: number, at: number) =>
-      candidates.push({ slotAt: slot.slotAt, effectiveAt: E, kind, seq, at });
+      candidates.push({ slotAt: slot.slotAt, effectiveAt: E, kind, seq, at, cutoff: slot.cutoff });
     if (lead > 0) push("headsUp", 0, E - lead);
     push("due", 0, E);
     if (every > 0) for (let k = 1; k * every <= maxNag; k++) push("nag", k, E + k * every);

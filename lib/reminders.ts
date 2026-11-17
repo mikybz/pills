@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { pushConfigured, sendToUser } from "@/lib/push";
-import { reminderPayload, type ReminderItem } from "@/lib/reminder-text";
+import { closePayload, reminderPayload, type ReminderItem } from "@/lib/reminder-text";
 import { DAY, MIN, isFinished, reminderEvents, type ReminderEvent } from "@/lib/schedule";
 import { currentScheduleFrom, doseAmountOf, scheduleOf, toLogEntries } from "@/lib/types";
 
@@ -51,17 +51,29 @@ async function tick(state: State) {
   }
 }
 
-interface Pending {
+interface Recipient {
   userId: string;
   locale: string;
   leadMin: number;
-  person: { id: string; name: string; timezone: string; selfOfUserId: string | null };
-  item: ReminderItem;
-  ev: ReminderEvent;
+  /** Reminders stop this long after a slot (with the lead: how far back "open" reaches). */
+  windowMin: number;
 }
 
-/** Sends every reminder falling in (from, to]. Exported for manual runs / tests. */
-export async function runReminders(from: number, to: number) {
+interface Entry {
+  recipient: Recipient;
+  person: { id: string; name: string; timezone: string; selfOfUserId: string | null };
+  /** Reminder events falling in (from, to]: what makes this tick send. */
+  events: { medicineId: string; slotAt: number; kind: string; seq: number }[];
+  /** Every slot still unanswered and being reminded about at `to`. */
+  open: ReminderItem[];
+}
+
+/**
+ * Per user and person: events in (from, to] and the slots still open at `to`.
+ * Open = a reminder event happened in the last lead + repeat window, the slot has no
+ * log, is not snoozed (snoozed events are withheld) and is before its cutoff.
+ */
+async function collect(from: number, to: number, personId?: string): Promise<Entry[]> {
   const recipientFilter = {
     reminders: true,
     user: { remindersOn: true, pushSubscriptions: { some: {} } },
@@ -73,6 +85,7 @@ export async function runReminders(from: number, to: number) {
       hidden: false,
       remindersEnabled: true,
       scheduleReviewedAt: { not: null },
+      ...(personId ? { personId } : {}),
       person: { access: { some: recipientFilter } },
     },
     include: {
@@ -82,11 +95,11 @@ export async function runReminders(from: number, to: number) {
     },
   });
 
-  const pending: Pending[] = [];
+  const entries = new Map<string, Entry>();
   const since = new Date(to - 3 * DAY);
   for (const m of medicines) {
     const schedule = scheduleOf(m, m.person);
-    if (isFinished(schedule, to)) continue;
+    const finished = isFinished(schedule, to);
     const [doses, snoozeRows] = await Promise.all([
       prisma.doseLog.findMany({
         where: { medicineId: m.id, OR: [{ takenAt: { gte: since } }, { slotAt: { gte: since } }] },
@@ -98,7 +111,16 @@ export async function runReminders(from: number, to: number) {
     const logs = toLogEntries(doses, m);
     for (const access of m.person.access) {
       const u = access.user;
-      const events = reminderEvents({
+      const key = `${u.id}|${m.person.id}`;
+      const entry = entries.get(key) ?? {
+        recipient: { userId: u.id, locale: u.locale, leadMin: u.remindLeadMin, windowMin: u.remindLeadMin + u.nagMaxMin },
+        person: m.person,
+        events: [],
+        open: [],
+      };
+      entries.set(key, entry);
+      if (finished) continue;
+      const args = {
         schedule,
         logs,
         anchor: (m.scheduleReviewedAt ?? m.createdAt).getTime(),
@@ -107,68 +129,91 @@ export async function runReminders(from: number, to: number) {
         snoozes: snoozeRows
           .filter((r) => r.userId === u.id && r.until)
           .map((r) => ({ slotAt: r.slotAt.getTime(), until: r.until!.getTime(), seq: r.seq })),
-        from,
         to,
-      });
-      for (const ev of events) {
-        pending.push({
-          userId: u.id,
-          locale: u.locale,
-          leadMin: u.remindLeadMin,
-          person: m.person,
-          item: {
-            medicineId: m.id,
-            name: m.name,
-            amount: doseAmountOf(m),
-            unit: m.unit,
-            form: m.form,
-            slotAt: ev.slotAt,
-          },
-          ev,
+      };
+      for (const ev of reminderEvents({ ...args, from })) {
+        entry.events.push({ medicineId: m.id, slotAt: ev.slotAt, kind: ev.kind, seq: ev.seq });
+      }
+      // The latest event per slot decides the wording of its line.
+      const latest = new Map<number, ReminderEvent>();
+      const lookback = to - (entry.recipient.windowMin + 1) * MIN;
+      for (const ev of reminderEvents({ ...args, from: lookback })) latest.set(ev.slotAt, ev);
+      for (const ev of latest.values()) {
+        if (ev.cutoff <= to) continue;
+        entry.open.push({
+          medicineId: m.id,
+          name: m.name,
+          amount: doseAmountOf(m),
+          unit: m.unit,
+          form: m.form,
+          slotAt: ev.slotAt,
+          effectiveAt: ev.effectiveAt,
+          kind: ev.kind,
         });
       }
     }
   }
+  return [...entries.values()];
+}
 
-  // One notification per user, person, instant and kind.
-  const groups = new Map<string, Pending[]>();
-  for (const p of pending) {
-    const key = `${p.userId}|${p.person.id}|${p.ev.at}|${p.ev.kind}`;
-    groups.set(key, [...(groups.get(key) ?? []), p]);
-  }
+function payloadFor(entry: Entry, update = false) {
+  return reminderPayload({
+    locale: entry.recipient.locale,
+    person: entry.person,
+    forOther: entry.person.selfOfUserId !== entry.recipient.userId,
+    leadMin: entry.recipient.leadMin,
+    items: entry.open,
+    update,
+  });
+}
 
-  for (const group of groups.values()) {
-    const fresh: Pending[] = [];
-    for (const p of group) {
+/** Sends every reminder falling in (from, to]. Exported for manual runs / tests. */
+export async function runReminders(from: number, to: number) {
+  for (const entry of await collect(from, to)) {
+    if (!entry.events.length) continue;
+    let fresh = false;
+    for (const ev of entry.events) {
       try {
         await prisma.reminderLog.create({
           data: {
-            medicineId: p.item.medicineId,
-            slotAt: new Date(p.ev.slotAt),
-            userId: p.userId,
-            kind: p.ev.kind,
-            seq: p.ev.seq,
+            medicineId: ev.medicineId,
+            slotAt: new Date(ev.slotAt),
+            userId: entry.recipient.userId,
+            kind: ev.kind,
+            seq: ev.seq,
           },
         });
-        fresh.push(p);
+        fresh = true;
       } catch (e) {
         // Unique violation: already sent (e.g. before a restart).
         if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
       }
     }
-    if (!fresh.length) continue;
-    const first = fresh[0];
-    await sendToUser(
-      first.userId,
-      reminderPayload({
-        locale: first.locale,
-        kind: first.ev.kind,
-        person: first.person,
-        forOther: first.person.selfOfUserId !== first.userId,
-        effectiveAt: first.ev.effectiveAt,
-        leadMin: first.leadMin,
-        items: fresh.map((p) => p.item),
-      }),
+    // One notification per person: everything open, so it replaces the last one.
+    if (fresh && entry.open.length) await sendToUser(entry.recipient.userId, payloadFor(entry));
+  }
+}
+
+/**
+ * After doses changed for a person: bring each device's reminder notification in
+ * line. Nothing open → close it; fewer slots open → replace it quietly. Only for
+ * users who were sent a reminder for this person recently, so a log with nothing
+ * on screen costs no push.
+ */
+export async function syncReminderNotifications(personId: string, now = Date.now()) {
+  if (!pushConfigured()) return;
+  const entries = await collect(now, now, personId);
+  if (!entries.length) return;
+  const recent = await prisma.reminderLog.findMany({
+    where: { userId: { in: entries.map((e) => e.recipient.userId) }, kind: { not: "snooze" }, sentAt: { gte: new Date(now - DAY) } },
+    select: { userId: true, sentAt: true, medicine: { select: { personId: true } } },
+  });
+  for (const entry of entries) {
+    const r = entry.recipient;
+    const notified = recent.some(
+      (l) => l.userId === r.userId && l.medicine.personId === personId && l.sentAt.getTime() >= now - (r.windowMin + 5) * MIN,
     );
+    if (!notified) continue;
+    await sendToUser(r.userId, entry.open.length ? payloadFor(entry, true) : closePayload(r.locale, personId));
   }
 }
