@@ -5,6 +5,9 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Version-skew protection: a client-side navigation that reaches a newer build does
+  // a full reload. From the build-time version (Dockerfile); Next allows no dots.
+  deploymentId: process.env.NEXT_PUBLIC_APP_VERSION?.replaceAll(".", "-"),
   async headers() {
     return [
       {

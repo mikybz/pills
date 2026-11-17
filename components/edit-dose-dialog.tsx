@@ -19,6 +19,7 @@ import { unitLabel } from "@/lib/format";
 import type { DoseDTO, MedicineDTO } from "@/lib/types";
 import type { DoseStatus } from "@/lib/schedule";
 import { cn } from "@/lib/utils";
+import { useBlockReload } from "@/components/update-check";
 
 /** Edit or delete a logged dose. Render only while open. */
 export function EditDoseDialog({
@@ -35,6 +36,7 @@ export function EditDoseDialog({
   onChanged: () => void;
 }) {
   const t = useTranslations();
+  useBlockReload();
   const [amount, setAmount] = useState(String(dose.amount));
   const [takenAt, setTakenAt] = useState(Date.parse(dose.takenAt));
   const [status, setStatus] = useState<DoseStatus>(dose.status as DoseStatus);

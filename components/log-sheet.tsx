@@ -13,6 +13,7 @@ import { formatAmount, formatDayWord, formatTime, unitLabel } from "@/lib/format
 import { isScheduled, MIN, type DoseStatus } from "@/lib/schedule";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+import { useBlockReload } from "@/components/update-check";
 
 export interface LogRequest {
   amount: number;
@@ -49,6 +50,7 @@ export function LogSheet({
   onSubmit: (req: LogRequest) => void;
 }) {
   const t = useTranslations();
+  useBlockReload();
   const locale = useLocale();
   const now = useNow();
   const presets = isScheduled(medicine.mode) ? [doseAmountOf(medicine)] : parsePresets(medicine);

@@ -8,7 +8,11 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # Dummy URL so prisma/next don't complain at build time; real one comes from env.
 ENV DATABASE_URL="file:./data/pills.db"
-RUN npm run build
+# The version is the build time in UTC (2026.11.17-0933): every push to main builds, so
+# every deploy gets a new one (.git isn't in the build context). Baked into server and
+# browser bundles alike; next.config.ts derives Next's deploymentId from it.
+# See lib/version.ts.
+RUN NEXT_PUBLIC_APP_VERSION=$(date -u +%Y.%m.%d-%H%M) npm run build
 
 # Prisma CLI stage — `migrate deploy` needs the CLI's full dependency tree,
 # which the Next standalone output does not include.

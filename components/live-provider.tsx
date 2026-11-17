@@ -19,6 +19,7 @@ import { formatWhen } from "@/lib/format";
 import { loggedDetail, loggedLines, type LoggedBatch } from "@/lib/live-text";
 import type { LiveBatch, LiveEvent } from "@/lib/live";
 import { cn } from "@/lib/utils";
+import { CHECK_VERSION_EVENT } from "@/lib/version";
 
 /** A change for one person (or `null` = refetch everything, after a dropped connection). */
 export type LiveChange = { personId: string | null; type: LiveEvent["type"] | "resync" };
@@ -172,7 +173,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const connect = () => {
       es = new EventSource("/api/events");
       es.onopen = () => {
-        if (dropped) resync();
+        if (dropped) {
+          resync();
+          // A deploy restarts the server, which drops the stream: maybe a new version.
+          window.dispatchEvent(new Event(CHECK_VERSION_EVENT));
+        }
         dropped = false;
       };
       es.onerror = () => {

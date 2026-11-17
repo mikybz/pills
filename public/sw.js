@@ -2,7 +2,9 @@
 // shows reminder notifications and handles their Taken / Snooze actions, and
 // shows "Anna gave Rex …" notices (kind "logged").
 // Logging always needs the network; nothing is queued offline.
-const CACHE = "pills-v2";
+// The cache is named after the app version (layout.tsx registers /sw.js?v=<version>):
+// a deploy installs a new worker, and `activate` deletes the old build's cache.
+const CACHE = `pills-${new URL(self.location.href).searchParams.get("v") || "dev"}`;
 const SHELL = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {

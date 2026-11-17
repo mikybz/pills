@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
+import { UpdateCheck } from "@/components/update-check";
+import { APP_VERSION } from "@/lib/version";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -51,10 +53,15 @@ export default async function RootLayout({
             __html: `try{const t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`,
           }}
         />
-        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider>
+          {children}
+          <UpdateCheck />
+        </NextIntlClientProvider>
+        {/* The worker's URL carries the version: each deploy installs a new worker,
+            which names its cache after it and drops the old ones (public/sw.js). */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js",{updateViaCache:"none"}))`,
+            __html: `if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=${encodeURIComponent(APP_VERSION)}",{updateViaCache:"none"}))`,
           }}
         />
         <Toaster position="top-center" />

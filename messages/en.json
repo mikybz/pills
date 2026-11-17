@@ -270,7 +270,8 @@
     "liveSoundHint": "A short chime on this device while the app is open.",
     "signOut": "Sign out",
     "help": "Help",
-    "saved": "Saved"
+    "saved": "Saved",
+    "version": "Pills {version}"
   },
   "help": {
     "title": "Help",
@@ -430,5 +431,10 @@
     "block": "Block",
     "blockConfirm": "Block {name}? They lose access and get no more reminders. Their logged doses stay.",
     "allowAgain": "Allow again"
+  },
+  "update": {
+    "updated": "Updated to {version}",
+    "ready": "A new version is ready.",
+    "reload": "Reload"
   }
 }

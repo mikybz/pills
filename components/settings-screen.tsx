@@ -41,6 +41,7 @@ import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { useLiveRefresh } from "@/components/live-provider";
 import { setLiveSound, useLiveSound } from "@/lib/chime";
+import { APP_VERSION } from "@/lib/version";
 
 export function SettingsScreen() {
   const t = useTranslations();
@@ -337,6 +338,9 @@ export function SettingsScreen() {
             <span className="ml-auto text-sm text-muted-foreground">{profile.email}</span>
           </button>
         </Card>
+        <p className="pt-2 text-center text-xs text-muted-foreground">
+          {t("settings.version", { version: APP_VERSION })}
+        </p>
       </section>
 
       {editing !== null && (
