@@ -47,6 +47,7 @@ import {
 } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+import { useBlockReload } from "@/components/update-check";
 
 const FORMS = ["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"] as const;
 const UNITS = ["pcs", "appl", "mg", "µg", "g", "ml", "IU", "puffs"];
@@ -128,6 +129,7 @@ export function MedicineDialog({
   onChanged: () => void;
 }) {
   const t = useTranslations();
+  useBlockReload();
   const locale = useLocale();
   const now = useNow();
   const [s, setS] = useState(() => initialState(medicine, defaultColor, day));

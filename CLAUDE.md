@@ -10,7 +10,7 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 - `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login; a
   `devUser=anna` cookie then signs that browser in as a second user, for sharing)
 - `npm run build` / `npm run lint`
-- `npx vitest run` — unit tests (access gate, schedule, day window, drift, dose check, migration guess,
+- `npm test` (`npx vitest run`) — unit tests (access gate, schedule, day window, drift, dose check, migration guess,
   timezone math, reminder text, live text)
 - `npx prisma migrate dev` — apply/create migrations (SQLite)
 
@@ -86,6 +86,10 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   in `components/person-context.tsx` (session-scoped; app start opens
   `User.defaultPersonId`). `DoseLog.userId` = who logged it. `PersonAccess.reminders` =
   whether that user gets reminders for that person (on for self, off for others).
+- **Versioning** — `lib/version.ts` (`APP_VERSION` = build time stamped by the Dockerfile,
+  `dev` locally), `GET /api/version`, `components/update-check.tsx` (mounted in the root
+  layout) reloads open pages after a deploy. A dialog that holds unsaved input or a one-time
+  value calls `useBlockReload()` (mounted only while open). The SW cache is per version.
 - **i18n** — next-intl, no locale routing; locale from the `locale` cookie
   (`i18n/request.ts`). ALL user-visible strings go through `messages/en.json` + `nb.json` —
   add keys to both.

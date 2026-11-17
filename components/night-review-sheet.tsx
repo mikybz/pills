@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { api } from "@/lib/client";
 import { colorClasses, type NightCandidate } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useBlockReload } from "@/components/update-check";
 
 type Choice = "move" | "keep" | "leave";
 
@@ -33,6 +34,7 @@ export function NightReviewSheet({
   onApplied: (leftSome: boolean) => void;
 }) {
   const t = useTranslations();
+  useBlockReload();
   const [choices, setChoices] = useState<Record<string, Choice>>(() =>
     Object.fromEntries(candidates.map((c) => [c.medicine.id, "move" as Choice])),
   );

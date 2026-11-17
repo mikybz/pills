@@ -302,6 +302,18 @@ strings.
   iOS/Android/desktop. Simple service worker for shell caching (read-only offline view
   of cached data; logging requires network — offline queue is a later feature). The service
   worker also shows reminder notifications (§2.5).
+- **Version & auto-update**: every build is stamped with its build time in UTC
+  (`2026.11.17-0933`, `NEXT_PUBLIC_APP_VERSION` in the Dockerfile; `dev` locally), shown as
+  a grey "Pills <version>" line at the bottom of Settings and served by `GET /api/version`
+  (no login, `no-store`). An open tab or installed app checks it when it comes back to the
+  front, when the network returns, when the live stream reconnects (a deploy restarts the
+  server) and every 5 min while visible; on a newer version it reloads and toasts "Updated
+  to <version>". While a dialog with input (log sheet, edit dose, medicine, person, share
+  code, join, night review) is open it shows "A new version is ready." + Reload instead.
+  It never reloads twice for the same version (no loops). Next's `deploymentId` makes
+  client-side navigations into a newer build hard reloads. The service worker is
+  registered as `/sw.js?v=<version>`: each deploy installs a new worker whose cache is
+  named after the version; old caches are deleted on activate, and pages are network-first.
 - **Dockerfile** (Next standalone output) + healthcheck; deployed via Dokploy on the
   Hostinger VPS, domain `pills.valensendstad.no` (Traefik + Let's Encrypt), SQLite on a
   mounted volume, env vars for Authentik OIDC.

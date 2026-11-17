@@ -270,7 +270,8 @@
     "liveSoundHint": "Et kort pling på denne enheten mens appen er åpen.",
     "signOut": "Logg ut",
     "help": "Hjelp",
-    "saved": "Lagret"
+    "saved": "Lagret",
+    "version": "Pills {version}"
   },
   "help": {
     "title": "Hjelp",
@@ -430,5 +431,10 @@
     "block": "Blokker",
     "blockConfirm": "Blokkere {name}? De mister tilgangen og får ingen flere påminnelser. Loggede doser blir liggende.",
     "allowAgain": "Slipp inn igjen"
+  },
+  "update": {
+    "updated": "Oppdatert til {version}",
+    "ready": "En ny versjon er klar.",
+    "reload": "Last inn på nytt"
   }
 }

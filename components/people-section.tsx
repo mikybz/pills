@@ -31,6 +31,7 @@ import { formatDay, formatTime } from "@/lib/format";
 import { DEFAULT_DAY, validDayWindow } from "@/lib/schedule";
 import { nightCandidates, PERSON_KINDS, type MedicineDTO, type NightCandidate, type PersonDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useBlockReload } from "@/components/update-check";
 
 export function PeopleSection() {
   const t = useTranslations("people");
@@ -197,6 +198,7 @@ export function PersonDialog({
   onChanged: (createdId?: string) => void;
 }) {
   const t = useTranslations("people");
+  useBlockReload();
   const tc = useTranslations("common");
   const [review, setReview] = useState<{ candidates: NightCandidate[]; window: string } | null>(null);
   const [name, setName] = useState(person?.name ?? "");
@@ -401,6 +403,7 @@ export function PersonDialog({
 
 function ShareDialog({ person, onClose }: { person: PersonDTO; onClose: () => void }) {
   const t = useTranslations("people");
+  useBlockReload();
   const tc = useTranslations("common");
   const locale = useLocale();
   const [share, setShare] = useState<{ code: string; expiresAt: string } | null>(null);
@@ -504,6 +507,7 @@ function JoinDialog({
   onJoined: (p: PersonDTO) => void;
 }) {
   const t = useTranslations("people");
+  useBlockReload(open);
   const tc = useTranslations("common");
   const [busy, setBusy] = useState(false);
 
