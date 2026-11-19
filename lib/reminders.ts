@@ -199,8 +199,12 @@ export async function runReminders(from: number, to: number) {
  * line. Nothing open → close it; fewer slots open → replace it quietly. Only for
  * users who were sent a reminder for this person recently, so a log with nothing
  * on screen costs no push.
+ *
+ * `fromEndpoint` = the device that logged last (it closed its own notification
+ * already). It gets no "close": a push that ends with nothing on screen makes
+ * Chrome show its own "tap to copy the URL" notification instead.
  */
-export async function syncReminderNotifications(personId: string, now = Date.now()) {
+export async function syncReminderNotifications(personId: string, now = Date.now(), fromEndpoint?: string | null) {
   if (!pushConfigured()) return;
   const entries = await collect(now, now, personId);
   if (!entries.length) return;
@@ -214,6 +218,7 @@ export async function syncReminderNotifications(personId: string, now = Date.now
       (l) => l.userId === r.userId && l.medicine.personId === personId && l.sentAt.getTime() >= now - (r.windowMin + 5) * MIN,
     );
     if (!notified) continue;
-    await sendToUser(r.userId, entry.open.length ? payloadFor(entry, true) : closePayload(r.locale, personId));
+    if (entry.open.length) await sendToUser(r.userId, payloadFor(entry, true));
+    else await sendToUser(r.userId, closePayload(r.locale, personId), undefined, fromEndpoint);
   }
 }

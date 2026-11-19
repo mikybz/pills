@@ -42,12 +42,20 @@ export interface PushPayload {
 }
 
 /**
- * Sends to every subscription of a user. Subscriptions the push service reports
+ * Sends to every subscription of a user (but `skipEndpoint`). Subscriptions the push service reports
  * as gone (404 / 410) are deleted.
  */
-export async function sendToUser(userId: string, payload: PushPayload, ttlSeconds = 1800) {
+export async function sendToUser(
+  userId: string,
+  payload: PushPayload,
+  ttlSeconds = 1800,
+  /** A subscription endpoint to leave out. */
+  skipEndpoint?: string | null,
+) {
   if (!pushConfigured()) return { sent: 0, failed: 0 };
-  const subs = await prisma.pushSubscription.findMany({ where: { userId } });
+  const subs = await prisma.pushSubscription.findMany({
+    where: { userId, ...(skipEndpoint ? { endpoint: { not: skipEndpoint } } : {}) },
+  });
   let sent = 0;
   let failed = 0;
   await Promise.all(

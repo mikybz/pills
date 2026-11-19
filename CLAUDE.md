@@ -49,7 +49,9 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   **One notification per person** (tag `reminders:<personId>`) listing every open slot;
   `collect()` in `lib/reminders.ts` computes events and open slots. After doses are
   logged / edited / undone `live.ts` queues `syncReminderNotifications` (10 s): `close` /
-  `update` pushes that the SW applies by tag (never a new alert). A new route that writes
+  `update` pushes that the SW applies by tag (never a new alert). Chrome shows its own "tap to copy the URL"
+  notification for any push that leaves nothing on screen, so the logging device closes its
+  reminder locally and sends `X-Push-Endpoint`; the server skips its `close` push. A new route that writes
   doses must call `doseCreated()` / `doseChanged()` so this runs.
 - **Live updates** — `lib/live.ts` (I/O): in-process event bus on `globalThis` →
   `GET /api/events` (SSE, 25 s heartbeat; re-checks the user isn't blocked). Write routes call `publish()` / `doseCreated()` /

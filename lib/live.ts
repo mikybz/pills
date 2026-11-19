@@ -27,7 +27,7 @@ interface Envelope {
   event: LiveEvent;
 }
 
-const g = globalThis as unknown as { __pillsLive?: EventEmitter; __pillsNotices?: Map<string, Notice>; __pillsSyncs?: Map<string, ReturnType<typeof setTimeout>> };
+const g = globalThis as unknown as { __pillsLive?: EventEmitter; __pillsNotices?: Map<string, Notice>; __pillsSyncs?: Map<string, { timer: ReturnType<typeof setTimeout> }> };
 
 function bus() {
   if (!g.__pillsLive) {
@@ -71,6 +71,8 @@ export async function doseCreated(
   dose: DoseRow,
   by: { id: string; name: string | null; email: string },
   medicine: { name: string; form: string; unit: string; personId: string },
+  /** Push endpoint of the logging device (`X-Push-Endpoint`), if it sent one. */
+  fromEndpoint?: string | null,
 ) {
   try {
     const person = await prisma.person.findUnique({
@@ -97,7 +99,7 @@ export async function doseCreated(
     };
     publish({ type: "doses", action: "created", personId: person.id, byUserId: by.id, batch });
     queueNotice(person.id, by.id, dose.id);
-    queueReminderSync(person.id);
+    queueReminderSync(person.id, fromEndpoint);
   } catch (e) {
     console.error("[live] doseCreated failed", e);
   }
@@ -201,15 +203,19 @@ async function sendNotice(personId: string, byUserId: string, doseIds: string[])
  * Doses changed for a person: after the undo window, close or shrink the reminder
  * notification on every device (`syncReminderNotifications`). One run per burst.
  */
-function queueReminderSync(personId: string) {
+function queueReminderSync(personId: string, fromEndpoint?: string | null) {
   const timers = (g.__pillsSyncs ??= new Map());
-  clearTimeout(timers.get(personId));
+  clearTimeout(timers.get(personId)?.timer);
+  // Only the last write's device closed its notification with everything known.
+  const endpoint = fromEndpoint ?? null;
   const timer = setTimeout(() => {
     timers.delete(personId);
-    void syncReminderNotifications(personId).catch((e) => console.error("[live] reminder sync failed", e));
+    void syncReminderNotifications(personId, Date.now(), endpoint).catch((e) =>
+      console.error("[live] reminder sync failed", e),
+    );
   }, NOTICE_DELAY_MS);
   (timer as { unref?: () => void }).unref?.();
-  timers.set(personId, timer);
+  timers.set(personId, { timer });
 }
 
 /** An edited or removed dose (the medicine still exists, so its person is known). */

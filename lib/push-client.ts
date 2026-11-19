@@ -123,3 +123,15 @@ export async function closeStaleNotifications(isLogged: (medicineId: string, slo
     if (items?.length && items.every((i) => isLogged(i.medicineId, Date.parse(i.slotAt)))) n.close();
   }
 }
+
+/** This device's push endpoint as a header, so the server skips its "close" push. */
+export async function pushEndpointHeader(): Promise<Record<string, string>> {
+  try {
+    if (!("serviceWorker" in navigator)) return {};
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager?.getSubscription();
+    return sub ? { "X-Push-Endpoint": sub.endpoint } : {};
+  } catch {
+    return {};
+  }
+}
