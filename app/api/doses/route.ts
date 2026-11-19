@@ -64,7 +64,9 @@ export async function POST(req: NextRequest) {
       },
     });
     const loggedBy = { id: user.id, name: user.name, email: user.email };
-    void doseCreated(dose, loggedBy, medicine);
+    // The logging device closes its own reminder; it sends its push endpoint so it gets no "close" push.
+    const endpoint = req.headers.get("x-push-endpoint")?.slice(0, 2048) || null;
+    void doseCreated(dose, loggedBy, medicine, endpoint);
     return NextResponse.json({ dose: { ...dose, loggedBy }, check }, { status: 201 });
   });
 }

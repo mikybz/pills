@@ -7,7 +7,7 @@ import { WarningDialog } from "@/components/warning-dialog";
 import type { LogRequest } from "@/components/log-sheet";
 import { api } from "@/lib/client";
 import { formatDose, formatTime, formatWhen } from "@/lib/format";
-import { closeStaleNotifications } from "@/lib/push-client";
+import { closeStaleNotifications, pushEndpointHeader } from "@/lib/push-client";
 import { checkDose, type CheckResult } from "@/lib/safety";
 import { nextSlotChange, slotForLog, type DoseStatus, type LogEntry } from "@/lib/schedule";
 import { localDate } from "@/lib/tz";
@@ -66,6 +66,8 @@ export function useDoseLogger({
       try {
         const res = await api<LogResponse>("/api/doses", {
           method: "POST",
+          // closeStaleNotifications() below closes this device's reminder itself.
+          headers: { "Content-Type": "application/json", ...(await pushEndpointHeader()) },
           body: JSON.stringify({
             medicineId: medicine.id,
             amount: req.amount,

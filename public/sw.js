@@ -91,18 +91,21 @@ async function appVisible() {
 /**
  * The server brought a person's reminder up to date after doses were logged (here,
  * on another device, or by someone else). "update" replaces the notification in
- * place; "close" removes it. Neither may raise a new alert, but browsers want every
- * push to show something: with nothing to replace, show a silent notification and
- * close it straight away.
+ * place (quietly showing it again if it was swiped away: doses are still open);
+ * "close" removes it. Chrome shows its own "tap to copy the URL" notification when a
+ * push leaves nothing on screen (a flash-and-close does not count), so the server
+ * sends no "close" to the device that logged the dose; it closed its own already.
+ * Safari revokes the subscription instead, so there we still flash one.
  */
 async function onSync(data, show) {
+  if (data.kind === "update") return show();
   const existing = await self.registration.getNotifications({ tag: data.tag });
-  if (data.kind === "update" && existing.length) return show();
-  if (!existing.length && !mustShow && (await appVisible())) return;
-  if (!existing.length || mustShow) {
+  if (mustShow) {
     await self.registration.showNotification(data.title || "Pills", { tag: data.tag, silent: true, icon: "/icon-192.png" });
+    for (const n of await self.registration.getNotifications({ tag: data.tag })) n.close();
+    return;
   }
-  for (const n of await self.registration.getNotifications({ tag: data.tag })) n.close();
+  for (const n of existing) n.close();
 }
 
 async function openApp(url = "/") {
@@ -122,10 +125,12 @@ async function tellWindows() {
 }
 
 async function post(path, body) {
+  // Our endpoint: the server then sends this device no "close" (we closed it here).
+  const sub = await self.registration.pushManager.getSubscription().catch(() => null);
   const res = await fetch(path, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(sub ? { "X-Push-Endpoint": sub.endpoint } : {}) },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(String(res.status));
