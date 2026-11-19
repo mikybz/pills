@@ -1,6 +1,7 @@
 // App-shell service worker: caches static assets (network-first for pages),
 // shows reminder notifications and handles their Taken / Snooze actions, and
-// shows "Anna gave Rex …" notices (kind "logged").
+// shows "Anna gave Rex …" notices (kind "logged"), and keeps one reminder per person
+// in step with the doses logged anywhere (kinds "update" / "close").
 // Logging always needs the network; nothing is queued offline.
 // The cache is named after the app version (layout.tsx registers /sw.js?v=<version>):
 // a deploy installs a new worker, and `activate` deletes the old build's cache.
@@ -51,12 +52,19 @@ self.addEventListener("push", (e) => {
       body: data.body || "",
       tag: data.tag,
       renotify: Boolean(data.tag && data.renotify),
+      silent: Boolean(data.silent),
       icon: "/icon-192.png",
       badge: "/icon-192.png",
       data: data.data || { url: "/" },
       actions: data.actions || [],
     });
-  e.waitUntil(data.kind === "logged" ? onLogged(data, show) : show());
+  e.waitUntil(
+    data.kind === "logged"
+      ? onLogged(data, show)
+      : data.kind === "close" || data.kind === "update"
+        ? onSync(data, show)
+        : show(),
+  );
 });
 
 // Safari revokes push subscriptions that receive a push without a notification.
@@ -71,9 +79,30 @@ async function onLogged(data, show) {
     if (Array.isArray(items) && items.length && items.every(answered)) n.close();
   }
   // An open, focused app already showed it live (overlay + chime).
-  const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-  if (!mustShow && wins.some((w) => w.focused && w.visibilityState === "visible")) return;
+  if (!mustShow && (await appVisible())) return;
   await show();
+}
+
+async function appVisible() {
+  const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return wins.some((w) => w.focused && w.visibilityState === "visible");
+}
+
+/**
+ * The server brought a person's reminder up to date after doses were logged (here,
+ * on another device, or by someone else). "update" replaces the notification in
+ * place; "close" removes it. Neither may raise a new alert, but browsers want every
+ * push to show something: with nothing to replace, show a silent notification and
+ * close it straight away.
+ */
+async function onSync(data, show) {
+  const existing = await self.registration.getNotifications({ tag: data.tag });
+  if (data.kind === "update" && existing.length) return show();
+  if (!existing.length && !mustShow && (await appVisible())) return;
+  if (!existing.length || mustShow) {
+    await self.registration.showNotification(data.title || "Pills", { tag: data.tag, silent: true, icon: "/icon-192.png" });
+  }
+  for (const n of await self.registration.getNotifications({ tag: data.tag })) n.close();
 }
 
 async function openApp(url = "/") {

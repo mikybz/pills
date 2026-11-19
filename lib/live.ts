@@ -8,6 +8,7 @@ import { EventEmitter } from "node:events";
 import { prisma } from "@/lib/db";
 import { loggedLines, shortName, type LoggedBatch, type LoggedItem, type LoggedStatus } from "@/lib/live-text";
 import { pushConfigured, sendToUser } from "@/lib/push";
+import { syncReminderNotifications } from "@/lib/reminders";
 import { translatorFor } from "@/lib/reminder-text";
 
 /** What the client hears. Sent only to users with access to `personId`. */
@@ -26,7 +27,7 @@ interface Envelope {
   event: LiveEvent;
 }
 
-const g = globalThis as unknown as { __pillsLive?: EventEmitter; __pillsNotices?: Map<string, Notice> };
+const g = globalThis as unknown as { __pillsLive?: EventEmitter; __pillsNotices?: Map<string, Notice>; __pillsSyncs?: Map<string, ReturnType<typeof setTimeout>> };
 
 function bus() {
   if (!g.__pillsLive) {
@@ -96,6 +97,7 @@ export async function doseCreated(
     };
     publish({ type: "doses", action: "created", personId: person.id, byUserId: by.id, batch });
     queueNotice(person.id, by.id, dose.id);
+    queueReminderSync(person.id);
   } catch (e) {
     console.error("[live] doseCreated failed", e);
   }
@@ -195,10 +197,29 @@ async function sendNotice(personId: string, byUserId: string, doseIds: string[])
   }
 }
 
+/**
+ * Doses changed for a person: after the undo window, close or shrink the reminder
+ * notification on every device (`syncReminderNotifications`). One run per burst.
+ */
+function queueReminderSync(personId: string) {
+  const timers = (g.__pillsSyncs ??= new Map());
+  clearTimeout(timers.get(personId));
+  const timer = setTimeout(() => {
+    timers.delete(personId);
+    void syncReminderNotifications(personId).catch((e) => console.error("[live] reminder sync failed", e));
+  }, NOTICE_DELAY_MS);
+  (timer as { unref?: () => void }).unref?.();
+  timers.set(personId, timer);
+}
+
 /** An edited or removed dose (the medicine still exists, so its person is known). */
 export function doseChanged(action: "updated" | "deleted", dose: { id: string; medicineId: string }, byUserId: string) {
   void prisma.medicine
     .findUnique({ where: { id: dose.medicineId }, select: { personId: true } })
-    .then((m) => m && publish({ type: "doses", action, personId: m.personId, byUserId, doseId: dose.id }))
+    .then((m) => {
+      if (!m) return;
+      publish({ type: "doses", action, personId: m.personId, byUserId, doseId: dose.id });
+      queueReminderSync(m.personId);
+    })
     .catch((e) => console.error("[live] doseChanged failed", e));
 }

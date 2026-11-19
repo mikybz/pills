@@ -1,4 +1,4 @@
--- Schedules and reminders (REWRITE.md). Existing medicines keep mode = NULL; the app
+-- Schedules and reminders (see PLAN.md §2, §12). Existing medicines keep mode = NULL; the app
 -- guesses a schedule per person on first open and the user reviews it.
 
 -- AlterTable

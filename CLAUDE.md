@@ -46,6 +46,11 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   (the public key is served by `GET /api/push/config`, not inlined at build).
   `public/sw.js` shows notifications and handles Taken / Snooze. Notification text is
   i18n'd server-side via `lib/reminder-text.ts` (verb by form: creams are "applied").
+  **One notification per person** (tag `reminders:<personId>`) listing every open slot;
+  `collect()` in `lib/reminders.ts` computes events and open slots. After doses are
+  logged / edited / undone `live.ts` queues `syncReminderNotifications` (10 s): `close` /
+  `update` pushes that the SW applies by tag (never a new alert). A new route that writes
+  doses must call `doseCreated()` / `doseChanged()` so this runs.
 - **Live updates** — `lib/live.ts` (I/O): in-process event bus on `globalThis` →
   `GET /api/events` (SSE, 25 s heartbeat; re-checks the user isn't blocked). Write routes call `publish()` / `doseCreated()` /
   `doseChanged()` after the write (fire-and-forget); recipients come from `PersonAccess`.
