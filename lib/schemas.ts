@@ -37,15 +37,16 @@ export const migrateSchema = z.object({ timezone: timeZone.optional() });
 
 export const reviewSchema = z.object({ medicineIds: z.array(z.string().min(1)).min(1).optional() });
 
-export const MODES = ["fixed", "interval", "asNeeded"] as const;
+export const MODES = ["fixed", "interval", "asNeeded", "flex", "once"] as const;
 
 export const medicineSchema = z.object({
   personId: z.string().min(1).optional(),
   name: z.string().trim().min(1).max(100),
+  kind: z.enum(["medicine", "task", "measure"]).optional(),
   form: z
     .enum(["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"])
     .default("pill"),
-  unit: z.string().min(1).max(10).default("pcs"),
+  unit: z.string().trim().min(1).max(12).default("pcs"),
   color: z.string().max(20).default("blue"),
   presets: z.array(z.number().positive()).min(1).max(4),
   defaultPreset: z.number().positive().nullable().optional(),
@@ -56,6 +57,15 @@ export const medicineSchema = z.object({
   doseAmount: z.number().positive().nullable().optional(),
   times: z.array(clock).max(24).nullable().optional(),
   intervalH: z.number().min(1).max(72).nullable().optional(),
+  /** Fixed: only on these weekdays (0 = Monday … 6 = Sunday). */
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).nullable().optional(),
+  /** Fixed: every N days from startsOn. */
+  everyDays: z.number().int().min(2).max(366).nullable().optional(),
+  /** Flex: at the latest every N days; optionally not more often than every N days. */
+  maxDays: z.number().int().min(1).max(730).nullable().optional(),
+  minDays: z.number().int().min(1).max(729).nullable().optional(),
+  /** Once: the local date it is due. */
+  dueOn: localDate.nullable().optional(),
   startsOn: localDate.nullable().optional(),
   endsOn: localDate.nullable().optional(),
   remindersEnabled: z.boolean().optional(),
@@ -64,6 +74,8 @@ export const medicineSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   sortOrder: z.number().int().optional(),
   hidden: z.boolean().optional(),
+  /** Create only (flex tasks): when it was last done; stored as its first log, without a "someone logged" notice. */
+  lastDoneAt: z.coerce.date().optional(),
 });
 
 export type MedicineInput = z.infer<typeof medicineSchema>;
@@ -71,22 +83,35 @@ export type MedicineInput = z.infer<typeof medicineSchema>;
 /** Cross-field rules, checked on the merged result of create/update. */
 export function scheduleProblem(m: {
   mode: string | null;
+  kind?: string | null;
   doseAmount?: number | null;
   times?: string[] | null;
   intervalH?: number | null;
+  weekdays?: number[] | null;
+  everyDays?: number | null;
+  maxDays?: number | null;
+  minDays?: number | null;
+  dueOn?: string | null;
   startsOn?: string | null;
   endsOn?: string | null;
 }): string | null {
-  if ((m.mode === "fixed" || m.mode === "interval") && !m.doseAmount) return "doseAmount required";
+  const doses = !m.kind || m.kind === "medicine";
+  if (doses && (m.mode === "fixed" || m.mode === "interval") && !m.doseAmount) return "doseAmount required";
   if (m.mode === "fixed" && !m.times?.length) return "times required";
+  if (m.mode === "fixed" && m.everyDays && !m.startsOn) return "startsOn required for everyDays";
+  if (m.mode === "fixed" && m.everyDays && m.weekdays?.length) return "weekdays or everyDays, not both";
   if (m.mode === "interval" && !m.intervalH) return "intervalH required";
+  if (m.mode === "flex" && !m.maxDays) return "maxDays required";
+  if (m.mode === "flex" && m.minDays && m.maxDays && m.minDays >= m.maxDays) return "minDays must be below maxDays";
+  if (m.mode === "once" && !m.dueOn) return "dueOn required";
   if (m.startsOn && m.endsOn && m.endsOn < m.startsOn) return "endsOn before startsOn";
   return null;
 }
 
 export const doseSchema = z.object({
   medicineId: z.string().min(1),
-  amount: z.number().positive(),
+  /** Doses and tasks: positive. Measurements: the value (0 allowed); checked per kind on write. */
+  amount: z.number().min(0).max(1_000_000),
   takenAt: z.coerce.date().optional(),
   /** The scheduled instant this log answers; assigned by the server when absent. */
   slotAt: z.coerce.date().nullable().optional(),
@@ -104,6 +129,7 @@ export const profileSchema = z.object({
   remindLeadMin: z.number().int().min(0).max(120).optional(),
   nagEveryMin: z.number().int().min(0).max(120).optional(),
   nagMaxMin: z.number().int().min(0).max(720).optional(),
+  careRemindTime: clock.optional(),
 });
 
 export const pushSubscriptionSchema = z.object({

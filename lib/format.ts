@@ -1,7 +1,7 @@
 // Pure formatting helpers shared by client and server. 24-hour clock in every
 // locale (hourCycle "h23" is passed explicitly everywhere). Times are shown in the
 // person's timezone when one is given.
-import { addDays, localDate } from "./tz";
+import { addDays, daysBetween, localDate } from "./tz";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -56,6 +56,22 @@ export function formatWhen(at: number, now: number, locale: string, timeZone: st
   return `${formatDay(at, locale, timeZone)} ${time}`;
 }
 
+/** A local date "YYYY-MM-DD" as "Wed 3 Dec" (no time zone involved). */
+export function formatLocalDate(date: string, locale: string) {
+  const [y, m, d] = date.split("-").map(Number);
+  return formatDay(Date.UTC(y, m - 1, d, 12), locale, "UTC");
+}
+
+/** Weekday name, 0 = Monday … 6 = Sunday ("Mon" / "man."; "M" narrow). */
+export function weekdayName(i: number, locale: string, style: "short" | "narrow" | "long" = "short") {
+  return new Intl.DateTimeFormat(tag(locale), { weekday: style, timeZone: "UTC" }).format(Date.UTC(2024, 0, 1 + i));
+}
+
+/** A number of days, in weeks when it divides evenly ("2 weeks", "10 days"). */
+export function formatDays(days: number, t: Translate) {
+  return days >= 7 && days % 7 === 0 ? t("describe.weeks", { count: days / 7 }) : t("describe.days", { count: days });
+}
+
 /** "08:00 and 20:00" / "08:00 og 20:00". */
 export function formatList(items: string[], locale: string) {
   return new Intl.ListFormat(tag(locale), { style: "long", type: "conjunction" }).format(items);
@@ -69,6 +85,13 @@ export function formatRelative(d: Date | number, locale: string, now: number) {
   const diffH = Math.round(diffMin / 60);
   if (Math.abs(diffH) < 24) return rtf.format(diffH, "hour");
   return rtf.format(Math.round(diffH / 24), "day");
+}
+
+/** "today" / "yesterday" / "4 days ago", by local dates in `timeZone` (nb: "for 4 dager siden", not Intl's "døgn"). */
+export function formatDaysAgo(at: number, now: number, locale: string, timeZone: string, t: Translate) {
+  const diff = daysBetween(localDate(at, timeZone), localDate(now, timeZone));
+  if (diff >= 2) return t("day.daysAgo", { count: diff });
+  return new Intl.RelativeTimeFormat(tag(locale), { numeric: "auto" }).format(-diff, "day");
 }
 
 /** Format an amount without trailing zeros: 0.5, 1, 1.25 */

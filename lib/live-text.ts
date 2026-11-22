@@ -12,6 +12,8 @@ export interface LoggedItem {
   medicineName: string;
   /** Creams are "applied", not "given". */
   form: string;
+  /** Tasks are "done", measurements "logged" (missing = medicine). */
+  itemKind?: "medicine" | "task" | "measure";
   amount: number;
   unit: string;
   status: LoggedStatus;
@@ -66,15 +68,23 @@ export function loggedLines(t: Translate, locale: string, batch: LoggedBatch, re
         by: batch.by.name,
         person: batch.person.name,
         medicine: formatList(names, locale),
-        form: items.every((i) => i.form === "cream") ? "cream" : "other",
+        form: verbOfItems(items),
       }),
     );
   }
   return lines;
 }
 
-/** "1 tablet · 14:05" (or "yesterday 20:00" for a backdated log). */
+/** The verb family for a set of logs: all tasks "did", all measurements "logged", all creams "applied". */
+function verbOfItems(items: LoggedItem[]): "cream" | "task" | "measure" | "other" {
+  if (items.every((i) => i.itemKind === "task")) return "task";
+  if (items.every((i) => i.itemKind === "measure")) return "measure";
+  if (items.every((i) => i.form === "cream" && (i.itemKind ?? "medicine") === "medicine")) return "cream";
+  return "other";
+}
+
+/** "1 tablet · 14:05", "31.4 kg · 14:05", a task just "14:05" (or "yesterday 20:00" for a backdated log). */
 export function loggedDetail(t: Translate, locale: string, item: LoggedItem, now: number, timeZone: string) {
   const when = formatWhen(item.takenAt, now, locale, timeZone, t);
-  return item.status === "skipped" ? when : `${formatDose(item.amount, item.unit, t)} · ${when}`;
+  return item.status === "skipped" || item.itemKind === "task" ? when : `${formatDose(item.amount, item.unit, t)} · ${when}`;
 }

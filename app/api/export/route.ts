@@ -7,6 +7,7 @@ import { doseAmountOf, segmentsOf, toLogEntries, type MedicineDTO } from "@/lib/
 
 interface Row {
   medicine: string;
+  kind: string;
   mode: string;
   amount: number;
   unit: string;
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest) {
       for (const d of m.doses) {
         rows.push({
           medicine: m.name,
+          kind: m.kind,
           mode,
           amount: d.amount,
           unit: m.unit,
@@ -57,6 +59,7 @@ export async function GET(req: NextRequest) {
         if (s.state !== "missed") continue;
         rows.push({
           medicine: m.name,
+          kind: m.kind,
           mode,
           amount: doseAmountOf(m),
           unit: m.unit,
@@ -82,10 +85,11 @@ export async function GET(req: NextRequest) {
 
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const csv = [
-      "medicine,mode,amount,unit,taken_at,slot_at,status,note,logged_by",
+      "medicine,kind,mode,amount,unit,taken_at,slot_at,status,note,logged_by",
       ...rows.map((r) =>
         [
           esc(r.medicine),
+          r.kind,
           r.mode,
           r.amount,
           r.unit,

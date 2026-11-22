@@ -200,7 +200,8 @@ shift (06/18 → 07/19), single time (23:30 → 23:00), re-spread (06/12/18/00 �
 the clock, bedtime cap, none over the night, none after a skip, none when disabled, no
 clamp around the clock; (17) interval due time in the sleep window ⇒ effective at wake;
 (18) reminder events use the drifted effective time; (19) `inSleep` at both window edges
-and for a wrapping window.
+and for a wrapping window. Tasks, to-dos, measurements and day rules (§15) are covered in
+`lib/care.test.ts` and the "day rules" block of `lib/schedule.test.ts`.
 
 ### 2.7 Day window
 - Each person has a usual day: `Person.wakeTime` / `bedTime` ("HH:MM" wall clock in the
@@ -247,6 +248,9 @@ throughout (card accent, chart series, dots).
 ---
 
 ## 4. Data model (Prisma / SQLite)
+
+> Since 2026-11-22 a `Medicine` row is any tracked item: `kind` medicine | task | measure,
+> modes flex / once, day rules `weekdays` / `everyDays`, and `User.careRemindTime` (§15).
 
 See `prisma/schema.prisma` (source of truth). Main tables: `User` (preferences, reminder
 settings), `Person` (+ `timezone`, `wakeTime`, `bedTime`), `PersonAccess` (+ `reminders`,
@@ -333,7 +337,7 @@ strings.
 
 ## 10. Nice-to-have backlog (not v1)
 
-Different dose amounts per slot · weekday / every-N-days schedules · different day windows
+Different dose amounts per slot · different day windows
 on weekends · moving times on a time-zone change · offline logging queue · multi-profile
 (carer logs for family member) · medication stock/refill tracking · doctor report PDF ·
 Apple/Google Health export · med interaction warnings · widgets.
@@ -461,6 +465,7 @@ These were settled with the product owner. Do not reopen them during implementat
 16. **No dead settings**: on a device that cannot show notifications, reminder settings
     are hidden except one global on/off switch (§3).
 
+(Weekday and every-N-days schedules were added on 2026-11-22, §15.)
 Out of scope for this release: different dose amounts per slot, weekday or every-N-days
 schedules, quiet hours, offline logging, stock and refill tracking. The data model in
 §4 should not make these hard to add later, but build none of them.
@@ -533,3 +538,67 @@ The code is `lib/guess.ts` (pure, tested in `lib/guess.test.ts`) and
 whether "taken early" needs a limit on how far ahead a slot can be filled (suggested: the
 next slot only); snooze length is fixed at 30 minutes; whether `GET /api/safety/:id`
 survives in reduced form.
+
+---
+
+## 15. Tasks, to-dos, measurements and weekly schedules (added 2026-11-22)
+
+Pills tracks more than medicines: a dog's claws, cream on the paws, a full wash; a vet
+visit; weight or blood pressure; a vitamin taken on Mondays only. Settled with the product
+owner on 2026-11-22 (one release; do not reopen):
+
+1. **One model.** Everything is a `Medicine` row with `kind`: `medicine` (doses),
+   `task` (done / not needed, amount 1) or `measure` (one number in `unit`, e.g. kg; no
+   pairs: blood pressure is two measurements). Persons, sharing, live updates, history,
+   archive and export work unchanged.
+2. **Two care modes** next to fixed / interval / as needed (pure `lib/care.ts`):
+   - `flex` — "at the latest every `maxDays`", optionally "not more often than every
+     `minDays`" (`minDays < maxDays`). Counted in the person's local days from the last
+     log of **any** status (a skip = "not needed this time" restarts the count). Due date
+     = last day + maxDays; never done = due the day it was set up (or `startsOn`). The
+     form's "When was it last done?" is sent as `lastDoneAt` on create and stored as the
+     first log without a "someone logged" notice.
+   - `once` — a dated to-do: `dueOn` (local date) plus an optional time `times[0]`. Any
+     log finishes it; Settings then shows "Done" with Archive.
+3. **States**: early (before last + minDays) → ok → soon (the last ~20 % of the window,
+   `leadDays` = round(0.2 × maxDays) clamped to 1–7, never the day it was done; a one-off:
+   the day before; never before the earliest date, so nothing nudges while doing it would
+   warn) → today → overdue. Medicines can't pick flex / once in the UI.
+4. **Today**: soon / today / overdue items sit under **Due now** after the doses (most
+   urgent first, "3 days left", "due today", "2 days overdue", "today at 10:30", plus "last
+   done 4 days ago") with **Done** (tasks) or **Log** (measurements, opens the value
+   sheet). Items not yet due are in a **Tasks** section with a quiet Done. Logs of today
+   appear under Done ("Cut claws — done", "Weight — 31.6 kg"). Measurements without a
+   schedule get a **Measurements** card with the last reading and Log.
+5. **Checks** (`checkDose`, never blocking): flex done again before `minDays` local
+   days ("It was done yesterday (…). Leave at least 2 days between times.") and a one-off
+   that is already done. Measurements are never checked.
+6. **Reminders**: one daily nudge per item from its soon date until it is done, at the
+   user's **care time** (`User.careRemindTime`, default 17:00, Settings → Reminders, wall
+   clock in the person's zone). A one-off with a time is nudged the evening before and an
+   hour before the time on its day (when that is earlier than the care time). Its own
+   notification per person, tag `care:<personId>`, one line per item, with a **Done**
+   action (absent when a measurement is listed: it needs a value). No snooze. ReminderLog
+   rows use kind `care`, `slotAt` = the cycle (start of the due date), `seq` = day number,
+   so sending is idempotent. `syncReminderNotifications` keeps it in step after logs
+   (update / close, up to a day after the last nudge) like the dose notification; a log
+   syncs only its own notification (a pill log never re-shows the care one). Fixed
+   measurements ride the dose reminders as "Time to measure: …" without a Taken action.
+7. **Day rules for fixed medicine schedules**: `weekdays` (0 = Monday
+   … 6 = Sunday) or `everyDays` counted from `startsOn` ("Weekly / some days" in the
+   form). `spanDays` (the longest gap between scheduled days) scales every fixed-mode look-
+   around, so a weekly dose has its normal window: overdue until halfway to the next one,
+   then missed; drift never moves another day's dose (also around the clock).
+   `ScheduleVersion` stores both fields. Measurements use "every day at set times" or flex
+   ("at the latest every 7 days" is the weekly weigh-in).
+8. **History**: tasks and readings are lanes and day-list rows ("done", "31.6 kg"); every
+   measurement with readings in the range gets a line chart; dose totals (month / year
+   bars) count medicines only. Export has a `kind` column.
+9. **Live wording**: "Anna marked Cut claws done for Bamse", "Anna logged Weight for Bamse".
+
+API: `GET /api/medicines` adds `lastLogAt` per item (care states count from it when it is
+older than the loaded doses). `POST /api/doses` accepts amount 0 only for measurements.
+Profile: `careRemindTime`. Migration `20261122120000_care_tasks` only adds columns.
+
+Real-device checks still open: the care notification at 17:00 with Done on Android, the
+close after Done in the app, and iOS (no actions).

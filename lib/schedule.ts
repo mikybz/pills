@@ -4,9 +4,14 @@
  *
  * Instants are epoch milliseconds. See PLAN.md §2 for the rules.
  */
-import { addDays, localDate, localTime, startOfLocalDay, zonedToUtc } from "./tz";
+import { addDays, daysBetween, localDate, localTime, startOfLocalDay, weekdayMon0, zonedToUtc } from "./tz";
 
-export type Mode = "fixed" | "interval" | "asNeeded";
+/**
+ * fixed / interval / asNeeded are dose schedules (PLAN.md §2). flex and once are
+ * care schedules (tasks, to-dos, measurements; PLAN.md §15, `lib/care.ts`): no slots,
+ * a due date instead.
+ */
+export type Mode = "fixed" | "interval" | "asNeeded" | "flex" | "once";
 export type DoseStatus = "taken" | "uncertain" | "skipped";
 
 export const MIN = 60_000;
@@ -40,6 +45,16 @@ export interface Schedule {
   day: DayWindow | null;
   /** Late-dose drift (fixed mode): a late dose moves the next slot. */
   drift: boolean;
+  /** Fixed mode day rule: only on these weekdays (0 = Monday … 6 = Sunday). */
+  weekdays?: number[] | null;
+  /** Fixed mode day rule: every N days counted from `startsOn`. */
+  everyDays?: number | null;
+  /** Flex mode: due at the latest this many days after it was last done. */
+  maxDays?: number | null;
+  /** Flex mode: doing it again sooner than this many days warns. */
+  minDays?: number | null;
+  /** Once mode: the local date it is due (an optional time is `times[0]`). */
+  dueOn?: string | null;
 }
 
 export interface LogEntry {
@@ -91,6 +106,41 @@ export function isScheduled(mode: string | null | undefined): mode is "fixed" | 
   return mode === "fixed" || mode === "interval";
 }
 
+/** Care schedules: a due date, no slots (`lib/care.ts`). */
+export function isCare(mode: string | null | undefined): mode is "flex" | "once" {
+  return mode === "flex" || mode === "once";
+}
+
+/* --------------------------------------------------------------- day rules */
+
+/** True when fixed-mode times apply on this local date (weekdays / every N days). */
+export function onScheduleDay(s: Pick<Schedule, "weekdays" | "everyDays" | "startsOn">, date: string): boolean {
+  if (s.weekdays?.length) return s.weekdays.includes(weekdayMon0(date));
+  if (s.everyDays && s.everyDays > 1 && s.startsOn) {
+    // The cycle runs on before startsOn too (neighbours for windows); `inBounds` cuts it.
+    const d = daysBetween(s.startsOn, date);
+    return ((d % s.everyDays) + s.everyDays) % s.everyDays === 0;
+  }
+  return true;
+}
+
+/**
+ * The longest run of days from one scheduled day to the next (1 = every day,
+ * 7 = weekly). Fixed-mode look-arounds (neighbour slots, windows) scale with it.
+ */
+export function spanDays(s: Pick<Schedule, "weekdays" | "everyDays">): number {
+  if (s.weekdays?.length) {
+    const days = [...new Set(s.weekdays)].sort((a, b) => a - b);
+    return Math.max(...days.map((d, i) => (i + 1 < days.length ? days[i + 1] - d : days[0] + 7 - d)));
+  }
+  return s.everyDays && s.everyDays > 1 ? s.everyDays : 1;
+}
+
+/** Fixed-mode look-around: enough to reach the neighbouring scheduled days. */
+function padOf(s: Schedule, extraDays: number) {
+  return (spanDays(s) + extraDays) * DAY;
+}
+
 /* ------------------------------------------------------------------ bounds */
 
 export function inBounds(s: Schedule, at: number): boolean {
@@ -112,6 +162,7 @@ function fixedRaw(s: Schedule, from: number, to: number): number[] {
   const out = new Set<number>();
   const last = addDays(localDate(to, s.timezone), 1);
   for (let date = addDays(localDate(from, s.timezone), -1); date <= last; date = addDays(date, 1)) {
+    if (!onScheduleDay(s, date)) continue;
     for (const t of s.times) {
       const at = zonedToUtc(date, t, s.timezone);
       if (at >= from && at <= to) out.add(at);
@@ -129,7 +180,7 @@ interface Frame {
 }
 
 function fixedFrames(s: Schedule, from: number, to: number): Frame[] {
-  const raw = fixedRaw(s, from - 3 * DAY, to + 3 * DAY);
+  const raw = fixedRaw(s, from - padOf(s, 2), to + padOf(s, 2));
   const gapAfter = (i: number) =>
     s.minIntervalMin ? s.minIntervalMin * MIN : (raw[i + 1] - raw[i]) / 2;
   const frames: Frame[] = [];
@@ -218,6 +269,8 @@ export function driftMs(s: Schedule, prevSlotAt: number, slotAt: number, takenAt
   if (!s.drift) return 0;
   const delay = takenAt - prevSlotAt;
   if (delay < HOUR) return 0;
+  // Weekly / every-N-days: a late dose never moves another day's dose (also around the clock).
+  if (spanDays(s) > 1 && localDate(slotAt, s.timezone) !== localDate(prevSlotAt, s.timezone)) return 0;
   const drift = Math.floor(delay / HOUR) * 30 * MIN;
   if (!s.day) return drift;
   if (inSleep(localTime(slotAt, s.timezone), s.day)) return 0;
@@ -238,7 +291,7 @@ export function fixedSlots(
   to: number,
   opts: StateOptions,
 ): Slot[] {
-  const frames = fixedFrames(s, from - 2 * DAY, to + 2 * DAY);
+  const frames = fixedFrames(s, from - padOf(s, 1), to + padOf(s, 1));
   const fill = fillLogs(frames, logs);
   const out: Slot[] = [];
   for (let i = 0; i < frames.length; i++) {
@@ -272,7 +325,7 @@ export function fixedSlots(
 export function nextSlotChange(s: Schedule, logs: LogEntry[], log: LogEntry, now: number): number | null {
   if (s.mode !== "fixed" || log.slotAt === null) return null;
   const opts = { now, leadMin: 0, missedFrom: null };
-  const range = [log.slotAt, log.slotAt + 2 * DAY] as const;
+  const range = [log.slotAt, log.slotAt + padOf(s, 1)] as const;
   const after = fixedSlots(s, [...logs, log], ...range, opts).find((sl) => sl.slotAt > log.slotAt!);
   if (!after || after.log) return null;
   const before = fixedSlots(s, logs, ...range, opts).find((sl) => sl.slotAt === after.slotAt);
@@ -343,7 +396,7 @@ export function minGapFor(s: Schedule, slotAt: number | null, at: number): numbe
   if (s.mode === "interval") return intervalMinGap(s);
   if (s.mode !== "fixed") return s.minIntervalMin ? s.minIntervalMin * MIN : 0;
   const ref = slotAt ?? at;
-  const frames = fixedFrames(s, ref - 2 * DAY, ref + 2 * DAY);
+  const frames = fixedFrames(s, ref - padOf(s, 1), ref + padOf(s, 1));
   const f =
     frames.find((fr) => fr.slotAt === slotAt) ??
     frames.find((fr) => at >= fr.windowStart && at < fr.cutoff) ??
@@ -375,12 +428,12 @@ export function assignSlot(
   if (s.mode !== "fixed") return null;
   const stateOpts = { now, leadMin: opts.leadMin, missedFrom: null };
   if (tap) {
-    const slots = fixedSlots(s, logs, now - 2 * DAY, now + 2 * DAY, stateOpts);
+    const slots = fixedSlots(s, logs, now - padOf(s, 1), now + padOf(s, 1), stateOpts);
     const open = slots.find((sl) => sl.state === "due" || sl.state === "overdue");
     if (open) return open.slotAt;
     return slots.find((sl) => sl.effectiveAt > now)?.slotAt ?? null;
   }
-  const slots = fixedSlots(s, logs, at - 2 * DAY, at + 2 * DAY, stateOpts);
+  const slots = fixedSlots(s, logs, at - padOf(s, 1), at + padOf(s, 1), stateOpts);
   const w = slots.find((sl) => at >= sl.windowStart && at < sl.cutoff);
   if (!w) return null;
   if (at < w.slotAt && localDate(w.slotAt, s.timezone) > localDate(at, s.timezone)) {

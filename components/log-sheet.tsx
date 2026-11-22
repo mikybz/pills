@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateTimeField } from "@/components/time-field";
-import { doseAmountOf, parsePresets, type MedicineDTO } from "@/lib/types";
+import { doseAmountOf, kindOf, parsePresets, type MedicineDTO } from "@/lib/types";
 import { formatAmount, formatDayWord, formatTime, unitLabel } from "@/lib/format";
 import { isScheduled, MIN, type DoseStatus } from "@/lib/schedule";
 import { useNow } from "@/lib/use-now";
@@ -53,9 +53,11 @@ export function LogSheet({
   useBlockReload();
   const locale = useLocale();
   const now = useNow();
+  const kind = kindOf(medicine);
   const presets = isScheduled(medicine.mode) ? [doseAmountOf(medicine)] : parsePresets(medicine);
   const fallback = doseAmountOf(medicine);
-  const [amount, setAmount] = useState(formatAmount(fallback));
+  // A measurement starts empty: the reading is typed in.
+  const [amount, setAmount] = useState(kind === "measure" ? "" : formatAmount(fallback));
   const [offsetMin, setOffsetMin] = useState<number | "custom">(initialAt ? "custom" : 0);
   const [customAt, setCustomAt] = useState<number | null>(initialAt ?? null);
   const [status, setStatus] = useState<DoseStatus>("taken");
@@ -65,19 +67,33 @@ export function LogSheet({
   const current = Number(amount);
   const unit = unitLabel(medicine.unit, t);
 
-  const timeChips: { label: string; value: number | "custom" }[] = [
-    { label: t("logSheet.now"), value: 0 },
-    { label: t("logSheet.minutesAgo", { minutes: 15 }), value: 15 },
-    { label: t("logSheet.hoursAgo", { hours: 1 }), value: 60 },
-    { label: t("logSheet.hoursAgo", { hours: 2 }), value: 120 },
-    { label: t("logSheet.customTime"), value: "custom" },
-  ];
+  // Tasks happen on days, not minutes: "yesterday" instead of "−15 min".
+  const timeChips: { label: string; value: number | "custom" }[] =
+    kind === "task"
+      ? [
+          { label: t("logSheet.now"), value: 0 },
+          { label: t("logSheet.yesterday"), value: 1440 },
+          { label: t("logSheet.customDay"), value: "custom" },
+        ]
+      : [
+          { label: t("logSheet.now"), value: 0 },
+          { label: t("logSheet.minutesAgo", { minutes: 15 }), value: 15 },
+          { label: t("logSheet.hoursAgo", { hours: 1 }), value: 60 },
+          { label: t("logSheet.hoursAgo", { hours: 2 }), value: 120 },
+          { label: t("logSheet.customTime"), value: "custom" },
+        ];
 
-  const statuses: { label: string; value: DoseStatus }[] = [
-    { label: t("logSheet.statusTaken"), value: "taken" },
-    { label: t("logSheet.statusUncertain"), value: "uncertain" },
-    { label: t("logSheet.statusSkipped"), value: "skipped" },
-  ];
+  const statuses: { label: string; value: DoseStatus }[] =
+    kind === "task"
+      ? [
+          { label: t("logSheet.statusDone"), value: "taken" },
+          { label: t("logSheet.statusNotNeeded"), value: "skipped" },
+        ]
+      : [
+          { label: t("logSheet.statusTaken"), value: "taken" },
+          { label: t("logSheet.statusUncertain"), value: "uncertain" },
+          { label: t("logSheet.statusSkipped"), value: "skipped" },
+        ];
 
   // Live: which scheduled dose this log counts as, once the time isn't "now".
   const chosenAt = offsetMin === "custom" ? Math.min(customAt ?? now, now) : now - offsetMin * MIN;
@@ -98,8 +114,11 @@ export function LogSheet({
     const now = Date.now();
     const takenAt =
       offsetMin === "custom" ? Math.min(customAt ?? now, now) : now - offsetMin * 60_000;
-    if (!Number.isFinite(current) || current <= 0) return;
-    onSubmit({ amount: current, takenAt, status, note: note.trim() || undefined, slotAt });
+    // A task is done or not: amount 1. A reading may be 0, a dose may not.
+    const value = kind === "task" ? 1 : current;
+    if (amount.trim() === "" && kind === "measure") return;
+    if (!Number.isFinite(value) || value < 0 || (value === 0 && kind !== "measure")) return;
+    onSubmit({ amount: value, takenAt, status, note: note.trim() || undefined, slotAt });
   }
 
   return (
@@ -110,50 +129,64 @@ export function LogSheet({
         </SheetHeader>
 
         <div className="space-y-5 px-4 pb-6">
-          <div>
-            <Label className="mb-2 block">{t("logSheet.amount", { unit })}</Label>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="-"
-                onClick={() => setAmount(formatAmount(Math.max(step, (current || fallback) - step)))}
-              >
-                <Minus className="size-4" />
-              </Button>
+          {kind === "measure" && (
+            <div>
+              <Label className="mb-2 block">{t("logSheet.value", { unit })}</Label>
               <Input
                 inputMode="decimal"
+                autoFocus
                 className="text-center text-lg font-semibold"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(",", "."))}
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="+"
-                onClick={() => setAmount(formatAmount((current || 0) + step))}
-              >
-                <Plus className="size-4" />
-              </Button>
             </div>
-            {presets.length > 1 && (
-              <div className="mt-2 flex gap-2">
-                {presets.map((p) => (
-                  <Button
-                    key={p}
-                    type="button"
-                    size="sm"
-                    variant={current === p ? "default" : "outline"}
-                    onClick={() => setAmount(formatAmount(p))}
-                  >
-                    {formatAmount(p)}
-                  </Button>
-                ))}
+          )}
+          {kind === "medicine" && (
+            <div>
+              <Label className="mb-2 block">{t("logSheet.amount", { unit })}</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="-"
+                  onClick={() => setAmount(formatAmount(Math.max(step, (current || fallback) - step)))}
+                >
+                  <Minus className="size-4" />
+                </Button>
+                <Input
+                  inputMode="decimal"
+                  className="text-center text-lg font-semibold"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value.replace(",", "."))}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="+"
+                  onClick={() => setAmount(formatAmount((current || 0) + step))}
+                >
+                  <Plus className="size-4" />
+                </Button>
               </div>
-            )}
-          </div>
+              {presets.length > 1 && (
+                <div className="mt-2 flex gap-2">
+                  {presets.map((p) => (
+                    <Button
+                      key={p}
+                      type="button"
+                      size="sm"
+                      variant={current === p ? "default" : "outline"}
+                      onClick={() => setAmount(formatAmount(p))}
+                    >
+                      {formatAmount(p)}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <Label className="mb-2 block">{t("logSheet.when")}</Label>
@@ -185,24 +218,26 @@ export function LogSheet({
             )}
           </div>
 
-          <div>
-            <Label className="mb-2 block">{t("logSheet.status")}</Label>
-            <div className="flex flex-col gap-1.5">
-              {statuses.map((s) => (
-                <button
-                  key={s.value}
-                  type="button"
-                  onClick={() => setStatus(s.value)}
-                  className={cn(
-                    "rounded-lg border px-3 py-2.5 text-left text-sm",
-                    status === s.value ? "border-teal-500 bg-teal-500/10 font-medium" : "border-border",
-                  )}
-                >
-                  {s.label}
-                </button>
-              ))}
+          {kind !== "measure" && (
+            <div>
+              <Label className="mb-2 block">{t("logSheet.status")}</Label>
+              <div className="flex flex-col gap-1.5">
+                {statuses.map((s) => (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => setStatus(s.value)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2.5 text-left text-sm",
+                      status === s.value ? "border-teal-500 bg-teal-500/10 font-medium" : "border-border",
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <Label className="mb-2 block">{t("logSheet.note")}</Label>
@@ -213,8 +248,8 @@ export function LogSheet({
             />
           </div>
 
-          <Button className="w-full" size="lg" onClick={submit}>
-            {t("logSheet.log")}
+          <Button className="w-full" size="lg" onClick={submit} disabled={kind === "measure" && amount.trim() === ""}>
+            {t("logSheet.log", { kind })}
           </Button>
         </div>
       </SheetContent>

@@ -1,15 +1,17 @@
 import type { Medicine, User } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { assignSlot, DAY, isScheduled, slotForLog } from "@/lib/schedule";
+import { assignSlot, DAY, isCare, isScheduled, slotForLog, spanDays } from "@/lib/schedule";
 import { checkDose } from "@/lib/safety";
-import { scheduleOf, toLogEntries, type PersonDay } from "@/lib/types";
+import { kindOf, scheduleOf, toLogEntries, type PersonDay } from "@/lib/types";
 
 type MedicineWithTz = Medicine & { person: PersonDay };
 
 /** Logs of a medicine around `at` (by taken time or slot), enough for slots and checks. */
 export async function logsAround(medicine: MedicineWithTz, at: number, excludeId?: string) {
-  const lo = new Date(at - 3 * DAY);
-  const hi = new Date(at + 3 * DAY);
+  // Weekly / every-N-days schedules need the neighbouring scheduled days too.
+  const pad = (spanDays(scheduleOf(medicine, medicine.person)) + 2) * DAY;
+  const lo = new Date(at - pad);
+  const hi = new Date(at + pad);
   const rows = await prisma.doseLog.findMany({
     where: {
       medicineId: medicine.id,
@@ -48,12 +50,26 @@ export function resolveSlot(args: {
   return assignSlot(schedule, logs, at, Date.now(), opts);
 }
 
+/** Care schedules: the last taken / uncertain log at or before `at` (may be older than `logsAround`). */
+export async function lastTakenBefore(medicine: MedicineWithTz, at: number): Promise<number | null> {
+  if (!isCare(medicine.mode)) return null;
+  const row = await prisma.doseLog.findFirst({
+    where: { medicineId: medicine.id, status: { in: ["taken", "uncertain"] }, takenAt: { lte: new Date(at) } },
+    orderBy: { takenAt: "desc" },
+    select: { takenAt: true },
+  });
+  return row?.takenAt.getTime() ?? null;
+}
+
 export function checkFor(
   medicine: MedicineWithTz,
   user: User,
   logs: ReturnType<typeof toLogEntries>,
   req: { amount: number; at: number; status: "taken" | "uncertain" | "skipped"; slotAt: number | null },
+  lastTakenAt: number | null = null,
 ) {
+  // A measurement is a reading, not a dose: nothing to warn about.
+  if (kindOf(medicine) === "measure") return { level: "ok" as const, reasons: [] };
   return checkDose({
     schedule: scheduleOf(medicine, medicine.person),
     limits: {
@@ -64,5 +80,6 @@ export function checkFor(
     logs,
     req,
     countUncertain: user.countUncertain,
+    lastTakenAt,
   });
 }

@@ -4,7 +4,8 @@ import { withUser, readJson, badRequest, notFound, tooMany } from "@/lib/api";
 import { LIMITS } from "@/lib/limits";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson, resolvePersonId } from "@/lib/persons";
-import { checkFor, logsAround, resolveSlot } from "@/lib/doses-server";
+import { checkFor, lastTakenBefore, logsAround, resolveSlot } from "@/lib/doses-server";
+import { kindOf } from "@/lib/types";
 import { doseCreated } from "@/lib/live";
 
 export async function GET(req: NextRequest) {
@@ -41,6 +42,8 @@ export async function POST(req: NextRequest) {
 
     const medicine = await findAccessibleMedicineWithPerson(user.id, medicineId);
     if (!medicine) return notFound();
+    // Only a measurement may be 0 (a reading); a dose or a task is a positive amount.
+    if (amount <= 0 && kindOf(medicine) !== "measure") return badRequest("amount must be positive");
     const loggedToday = await prisma.doseLog.count({
       where: { userId: user.id, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
     });
@@ -50,7 +53,13 @@ export async function POST(req: NextRequest) {
     const logs = await logsAround(medicine, when.getTime());
     const slotAt = resolveSlot({ medicine, user, logs, at: when.getTime(), requested });
     // Server is the source of truth: the check runs again here with the assigned slot.
-    const check = checkFor(medicine, user, logs, { amount, at: when.getTime(), status, slotAt });
+    const check = checkFor(
+      medicine,
+      user,
+      logs,
+      { amount, at: when.getTime(), status, slotAt },
+      await lastTakenBefore(medicine, when.getTime()),
+    );
 
     const dose = await prisma.doseLog.create({
       data: {

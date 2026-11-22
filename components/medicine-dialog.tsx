@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ChevronDown, Moon, Plus } from "lucide-react";
+import { ChevronDown, Moon, Plus, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { TimeField } from "@/components/time-field";
 import { api } from "@/lib/client";
-import { formatAmount, formatDuration, formatList, unitLabel } from "@/lib/format";
+import { formatAmount, formatDuration, formatList, unitLabel, weekdayName } from "@/lib/format";
 import {
   DEFAULT_TIMES,
   evenlySpaced,
@@ -36,13 +36,14 @@ import {
   timeOf,
   type DayWindow,
 } from "@/lib/schedule";
-import { addDays, daysBetween, localDate } from "@/lib/tz";
+import { addDays, daysBetween, localDate, weekdayMon0 } from "@/lib/tz";
 import {
   colorClasses,
   doseAmountOf,
   MEDICINE_COLORS,
   parsePresets,
   parseTimes,
+  parseWeekdays,
   type MedicineDTO,
 } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
@@ -52,18 +53,25 @@ import { useBlockReload } from "@/components/update-check";
 const FORMS = ["pill", "tablet", "capsule", "cream", "spray", "drops", "injection", "liquid", "other"] as const;
 const UNITS = ["pcs", "appl", "mg", "µg", "g", "ml", "IU", "puffs"];
 
-type Freq = "1" | "2" | "3" | "4" | "everyN" | "asNeeded";
+type Freq = "1" | "2" | "3" | "4" | "everyN" | "days" | "asNeeded";
+/** "On some days": chosen weekdays, or every N days from a start date. */
+type DayRule = "weekdays" | "every";
 type Course = "none" | "days" | "date";
 
 const num = (s: string) => Number(s.replace(",", "."));
 const optNum = (s: string) => (s.trim() === "" ? null : num(s));
 
-function initialState(m: MedicineDTO | null, defaultColor: string, day: DayWindow) {
+function initialState(m: MedicineDTO | null, defaultColor: string, day: DayWindow, today: string) {
   const times = sortTimes(parseTimes(m?.times));
+  const weekdays = parseWeekdays(m?.weekdays);
   let freq: Freq = "1";
   let everyH = "8";
   let everyKind: "fixed" | "interval" = "fixed";
-  if (m?.mode === "interval") {
+  let dayRule: DayRule = "weekdays";
+  if (m?.mode === "fixed" && (weekdays || (m.everyDays ?? 0) > 1)) {
+    freq = "days";
+    dayRule = weekdays ? "weekdays" : "every";
+  } else if (m?.mode === "interval") {
     freq = "everyN";
     everyH = formatAmount(m.intervalH ?? 8);
     everyKind = "interval";
@@ -81,6 +89,10 @@ function initialState(m: MedicineDTO | null, defaultColor: string, day: DayWindo
     freq,
     everyH,
     everyKind,
+    dayRule,
+    weekdays: weekdays ?? [weekdayMon0(today)],
+    everyDays: String(m?.everyDays && m.everyDays > 1 ? m.everyDays : 7),
+    everyFrom: m?.everyDays && m.startsOn ? m.startsOn : today,
     times: times.length ? times : spreadTimes(1, day),
     dose: formatAmount(m ? doseAmountOf(m) : 1),
     unit: m?.unit ?? "pcs",
@@ -132,14 +144,15 @@ export function MedicineDialog({
   useBlockReload();
   const locale = useLocale();
   const now = useNow();
-  const [s, setS] = useState(() => initialState(medicine, defaultColor, day));
+  const [s, setS] = useState(() => initialState(medicine, defaultColor, day, localDate(now, timeZone)));
   const [more, setMore] = useState(false);
   const [shiftBy, setShiftBy] = useState<number | null>(null);
   const set = <K extends keyof typeof s>(k: K, v: (typeof s)[K]) => setS((p) => ({ ...p, [k]: v }));
 
   const hours = num(s.everyH);
   const evenDivisor = Number.isFinite(hours) && hours >= 1 && Number.isInteger(24 / hours);
-  const isFixed = ["1", "2", "3", "4"].includes(s.freq) || (s.freq === "everyN" && s.everyKind === "fixed" && evenDivisor);
+  const isFixed =
+    ["1", "2", "3", "4", "days"].includes(s.freq) || (s.freq === "everyN" && s.everyKind === "fixed" && evenDivisor);
   const isInterval = s.freq === "everyN" && !isFixed;
   const isAsNeeded = s.freq === "asNeeded";
 
@@ -157,6 +170,7 @@ export function MedicineDialog({
         // Inside the person's day, unless the medicine is taken around the clock.
         next.times = p.aroundTheClock ? DEFAULT_TIMES[Number(f)] : spreadTimes(Number(f), day);
       }
+      if (f === "days") next.times = [p.times[0] ?? spreadTimes(1, day)[0]];
       if (f === "everyN") {
         const h = num(p.everyH);
         next.everyKind = Number.isInteger(24 / h) ? p.everyKind : "interval";
@@ -195,6 +209,23 @@ export function MedicineDialog({
       unit:
         form === "cream" && p.unit === "pcs" ? "appl" : form !== "cream" && p.unit === "appl" ? "pcs" : p.unit,
     }));
+  }
+
+  function toggleWeekday(d: number) {
+    setS((p) => {
+      const has = p.weekdays.includes(d);
+      // At least one day stays selected.
+      if (has && p.weekdays.length === 1) return p;
+      return { ...p, weekdays: has ? p.weekdays.filter((x) => x !== d) : [...p.weekdays, d].sort((a, b) => a - b) };
+    });
+  }
+
+  function addTime() {
+    setS((p) => ({ ...p, times: [...p.times, timeOf(minutesOf(p.times[p.times.length - 1] ?? "08:00") + 12 * 60)] }));
+  }
+
+  function removeTime(i: number) {
+    setS((p) => (p.times.length > 1 ? { ...p, times: p.times.filter((_, j) => j !== i) } : p));
   }
 
   function shiftOthers() {
@@ -238,6 +269,17 @@ export function MedicineDialog({
     } else {
       startsOn = null;
     }
+    // Every N days counts from its start date (which also starts the course).
+    const everyN = s.freq === "days" && s.dayRule === "every";
+    const everyDays = Math.round(num(s.everyDays));
+    if (everyN) {
+      if (!Number.isFinite(everyDays) || everyDays < 2 || !s.everyFrom) {
+        toast.error(t("medicine.invalid"));
+        return;
+      }
+      startsOn = s.everyFrom;
+      if (endsOn && endsOn < startsOn) endsOn = null;
+    }
 
     const common = {
       name: s.name.trim(),
@@ -252,6 +294,8 @@ export function MedicineDialog({
       aroundTheClock: s.aroundTheClock,
       driftEnabled: s.driftEnabled,
       minIntervalMin: minGap && minGap > 0 ? Math.round(minGap * 60) : null,
+      weekdays: s.freq === "days" && s.dayRule === "weekdays" ? s.weekdays : null,
+      everyDays: everyN ? everyDays : null,
       confirmSchedule: true,
     };
     let body: Record<string, unknown>;
@@ -309,6 +353,7 @@ export function MedicineDialog({
     { value: "3", label: t("medicine.freq3") },
     { value: "4", label: t("medicine.freq4") },
     { value: "everyN", label: t("medicine.freqEvery") },
+    { value: "days", label: t("medicine.freqDays") },
     { value: "asNeeded", label: t("medicine.freqAsNeeded") },
   ];
 
@@ -387,18 +432,87 @@ export function MedicineDialog({
             </div>
           )}
 
+          {s.freq === "days" && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["weekdays", "every"] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => set("dayRule", r)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-left text-sm font-medium",
+                      s.dayRule === r ? "border-teal-500 bg-teal-500/10" : "border-border",
+                    )}
+                  >
+                    {t(r === "weekdays" ? "medicine.onWeekdays" : "medicine.everyNDays")}
+                  </button>
+                ))}
+              </div>
+              {s.dayRule === "weekdays" ? (
+                <div className="flex gap-1" role="group" aria-label={t("medicine.onWeekdays")}>
+                  {Array.from({ length: 7 }, (_, d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={s.weekdays.includes(d)}
+                      aria-label={weekdayName(d, locale, "long")}
+                      onClick={() => toggleWeekday(d)}
+                      className={cn(
+                        "h-10 flex-1 rounded-lg border text-sm font-medium",
+                        s.weekdays.includes(d) ? "border-teal-600 bg-teal-600 text-white" : "border-border",
+                      )}
+                    >
+                      {weekdayName(d, locale, "narrow")}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span>{t("medicine.everyLabel")}</span>
+                  <Input
+                    inputMode="numeric"
+                    className="w-16 text-center"
+                    value={s.everyDays}
+                    onChange={(e) => set("everyDays", e.target.value.replace(/\D/g, ""))}
+                  />
+                  <span>{t("medicine.daysFrom")}</span>
+                  <Input
+                    type="date"
+                    className="h-9 w-auto"
+                    value={s.everyFrom}
+                    onChange={(e) => e.target.value && set("everyFrom", e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {isFixed && (
             <div>
               <Label className="mb-1.5 block">{t("medicine.times")}</Label>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {s.times.map((time, i) => (
-                  <TimeField
-                    key={i}
-                    value={time}
-                    label={t("medicine.timeN", { n: i + 1 })}
-                    onChange={(v) => setTime(i, v)}
-                  />
+                  <span key={i} className="inline-flex items-center">
+                    <TimeField value={time} label={t("medicine.timeN", { n: i + 1 })} onChange={(v) => setTime(i, v)} />
+                    {s.freq === "days" && s.times.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t("medicine.removeTime")}
+                        onClick={() => removeTime(i)}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    )}
+                  </span>
                 ))}
+                {s.freq === "days" && s.times.length < 6 && (
+                  <Button type="button" variant="outline" size="sm" className="h-10" onClick={addTime}>
+                    <Plus className="size-4" /> {t("medicine.addTime")}
+                  </Button>
+                )}
               </div>
               {shiftBy !== null && shiftBy !== 0 && (
                 <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={shiftOthers}>

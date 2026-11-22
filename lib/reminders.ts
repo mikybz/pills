@@ -6,9 +6,18 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { pushConfigured, sendToUser } from "@/lib/push";
-import { closePayload, reminderPayload, type ReminderItem } from "@/lib/reminder-text";
-import { DAY, MIN, isFinished, reminderEvents, type ReminderEvent } from "@/lib/schedule";
-import { currentScheduleFrom, doseAmountOf, scheduleOf, toLogEntries } from "@/lib/types";
+import { careOpen, careReminderEvents } from "@/lib/care";
+import {
+  carePayload,
+  careTag,
+  closePayload,
+  reminderPayload,
+  reminderTag,
+  type CareItem,
+  type ReminderItem,
+} from "@/lib/reminder-text";
+import { DAY, MIN, isFinished, reminderEvents, spanDays, type ReminderEvent } from "@/lib/schedule";
+import { currentScheduleFrom, doseAmountOf, kindOf, scheduleOf, toLogEntries } from "@/lib/types";
 
 const TICK_MS = 60_000;
 /** After a restart, look back at most this far so downtime doesn't cause a burst. */
@@ -96,10 +105,11 @@ async function collect(from: number, to: number, personId?: string): Promise<Ent
   });
 
   const entries = new Map<string, Entry>();
-  const since = new Date(to - 3 * DAY);
   for (const m of medicines) {
     const schedule = scheduleOf(m, m.person);
     const finished = isFinished(schedule, to);
+    // Weekly / every-N-days doses: logs back to the previous scheduled day.
+    const since = new Date(to - (spanDays(schedule) + 2) * DAY);
     const [doses, snoozeRows] = await Promise.all([
       prisma.doseLog.findMany({
         where: { medicineId: m.id, OR: [{ takenAt: { gte: since } }, { slotAt: { gte: since } }] },
@@ -146,6 +156,7 @@ async function collect(from: number, to: number, personId?: string): Promise<Ent
           amount: doseAmountOf(m),
           unit: m.unit,
           form: m.form,
+          itemKind: kindOf(m),
           slotAt: ev.slotAt,
           effectiveAt: ev.effectiveAt,
           kind: ev.kind,
@@ -154,6 +165,103 @@ async function collect(from: number, to: number, personId?: string): Promise<Ent
     }
   }
   return [...entries.values()];
+}
+
+interface CareEntry {
+  recipient: { userId: string; locale: string; remindTime: string };
+  person: { id: string; name: string; timezone: string; selfOfUserId: string | null };
+  /** Nudges falling in (from, to]. */
+  events: { medicineId: string; cycleAt: number; seq: number }[];
+  /** Every care item due and already nudged at `to`. */
+  open: CareItem[];
+}
+
+/**
+ * Care schedules (tasks, to-dos, measurements with flex / once): per user and
+ * person, the daily nudges in (from, to] and the items open at `to`. Same
+ * recipients as dose reminders.
+ */
+async function collectCare(from: number, to: number, personId?: string): Promise<CareEntry[]> {
+  const recipientFilter = {
+    reminders: true,
+    user: { remindersOn: true, pushSubscriptions: { some: {} } },
+  };
+  const items = await prisma.medicine.findMany({
+    where: {
+      mode: { in: ["flex", "once"] },
+      archivedAt: null,
+      hidden: false,
+      remindersEnabled: true,
+      scheduleReviewedAt: { not: null },
+      ...(personId ? { personId } : {}),
+      person: { access: { some: recipientFilter } },
+    },
+    include: {
+      person: { include: { access: { where: recipientFilter, include: { user: true } } } },
+      doses: { orderBy: { takenAt: "desc" }, take: 1, select: { takenAt: true } },
+    },
+  });
+  const entries = new Map<string, CareEntry>();
+  for (const m of items) {
+    const schedule = scheduleOf(m, m.person);
+    if (isFinished(schedule, to)) continue;
+    const lastAt = m.doses[0]?.takenAt.getTime() ?? null;
+    const anchor = (m.scheduleReviewedAt ?? m.createdAt).getTime();
+    for (const access of m.person.access) {
+      const u = access.user;
+      const key = `${u.id}|${m.person.id}`;
+      const entry = entries.get(key) ?? {
+        recipient: { userId: u.id, locale: u.locale, remindTime: u.careRemindTime },
+        person: m.person,
+        events: [],
+        open: [],
+      };
+      entries.set(key, entry);
+      const args = { schedule, lastAt, anchor, remindTime: u.careRemindTime };
+      for (const ev of careReminderEvents({ ...args, from, to })) {
+        entry.events.push({ medicineId: m.id, cycleAt: ev.cycleAt, seq: ev.seq });
+      }
+      const st = careOpen({ ...args, to });
+      if (st) {
+        entry.open.push({
+          medicineId: m.id,
+          name: m.name,
+          itemKind: kindOf(m),
+          state: st.state,
+          daysLeft: st.daysLeft,
+          dueAt: st.dueAt,
+          cycleAt: st.cycleAt,
+        });
+      }
+    }
+  }
+  return [...entries.values()];
+}
+
+function carePayloadFor(entry: CareEntry, now: number, update = false) {
+  return carePayload({
+    locale: entry.recipient.locale,
+    person: entry.person,
+    forOther: entry.person.selfOfUserId !== entry.recipient.userId,
+    items: entry.open,
+    now,
+    update,
+  });
+}
+
+/** Inserts the ReminderLog rows; true when at least one was new (not sent before). */
+async function claim(rows: { medicineId: string; slotAt: number; userId: string; kind: string; seq: number }[]) {
+  let fresh = false;
+  for (const r of rows) {
+    try {
+      await prisma.reminderLog.create({ data: { ...r, slotAt: new Date(r.slotAt) } });
+      fresh = true;
+    } catch (e) {
+      // Unique violation: already sent (e.g. before a restart).
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
+    }
+  }
+  return fresh;
 }
 
 function payloadFor(entry: Entry, update = false) {
@@ -171,26 +279,23 @@ function payloadFor(entry: Entry, update = false) {
 export async function runReminders(from: number, to: number) {
   for (const entry of await collect(from, to)) {
     if (!entry.events.length) continue;
-    let fresh = false;
-    for (const ev of entry.events) {
-      try {
-        await prisma.reminderLog.create({
-          data: {
-            medicineId: ev.medicineId,
-            slotAt: new Date(ev.slotAt),
-            userId: entry.recipient.userId,
-            kind: ev.kind,
-            seq: ev.seq,
-          },
-        });
-        fresh = true;
-      } catch (e) {
-        // Unique violation: already sent (e.g. before a restart).
-        if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
-      }
-    }
+    const fresh = await claim(entry.events.map((ev) => ({ ...ev, userId: entry.recipient.userId })));
     // One notification per person: everything open, so it replaces the last one.
     if (fresh && entry.open.length) await sendToUser(entry.recipient.userId, payloadFor(entry));
+  }
+  // Tasks and to-dos: their own notification per person, nudged once a day.
+  for (const entry of await collectCare(from, to)) {
+    if (!entry.events.length) continue;
+    const fresh = await claim(
+      entry.events.map((ev) => ({
+        medicineId: ev.medicineId,
+        slotAt: ev.cycleAt,
+        userId: entry.recipient.userId,
+        kind: "care",
+        seq: ev.seq,
+      })),
+    );
+    if (fresh && entry.open.length) await sendToUser(entry.recipient.userId, carePayloadFor(entry, to), 12 * 3600);
   }
 }
 
@@ -204,21 +309,43 @@ export async function runReminders(from: number, to: number) {
  * already). It gets no "close": a push that ends with nothing on screen makes
  * Chrome show its own "tap to copy the URL" notification instead.
  */
-export async function syncReminderNotifications(personId: string, now = Date.now(), fromEndpoint?: string | null) {
+export async function syncReminderNotifications(
+  personId: string,
+  now = Date.now(),
+  fromEndpoint?: string | null,
+  /** Which notifications the changed logs belong to (default both). */
+  groups: ReadonlySet<"doses" | "care"> = new Set(["doses", "care"]),
+) {
   if (!pushConfigured()) return;
-  const entries = await collect(now, now, personId);
-  if (!entries.length) return;
+  const [entries, careEntries] = await Promise.all([
+    groups.has("doses") ? collect(now, now, personId) : [],
+    groups.has("care") ? collectCare(now, now, personId) : [],
+  ]);
+  if (!entries.length && !careEntries.length) return;
+  const userIds = [...entries, ...careEntries].map((e) => e.recipient.userId);
   const recent = await prisma.reminderLog.findMany({
-    where: { userId: { in: entries.map((e) => e.recipient.userId) }, kind: { not: "snooze" }, sentAt: { gte: new Date(now - DAY) } },
-    select: { userId: true, sentAt: true, medicine: { select: { personId: true } } },
+    where: { userId: { in: userIds }, kind: { not: "snooze" }, sentAt: { gte: new Date(now - DAY - 5 * MIN) } },
+    select: { userId: true, kind: true, sentAt: true, medicine: { select: { personId: true } } },
   });
+  const sentSince = (userId: string, care: boolean, since: number) =>
+    recent.some(
+      (l) =>
+        l.userId === userId &&
+        (l.kind === "care") === care &&
+        l.medicine.personId === personId &&
+        l.sentAt.getTime() >= since,
+    );
   for (const entry of entries) {
     const r = entry.recipient;
-    const notified = recent.some(
-      (l) => l.userId === r.userId && l.medicine.personId === personId && l.sentAt.getTime() >= now - (r.windowMin + 5) * MIN,
-    );
-    if (!notified) continue;
+    if (!sentSince(r.userId, false, now - (r.windowMin + 5) * MIN)) continue;
     if (entry.open.length) await sendToUser(r.userId, payloadFor(entry, true));
-    else await sendToUser(r.userId, closePayload(r.locale, personId), undefined, fromEndpoint);
+    else await sendToUser(r.userId, closePayload(r.locale, reminderTag(personId)), undefined, fromEndpoint);
+  }
+  // The care notification stays up to a day (one nudge a day).
+  for (const entry of careEntries) {
+    const r = entry.recipient;
+    if (!sentSince(r.userId, true, now - DAY - 5 * MIN)) continue;
+    if (entry.open.length) await sendToUser(r.userId, carePayloadFor(entry, now, true), 12 * 3600);
+    else await sendToUser(r.userId, closePayload(r.locale, careTag(personId)), undefined, fromEndpoint);
   }
 }

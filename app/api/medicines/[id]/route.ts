@@ -4,7 +4,7 @@ import { withUser, readJson, badRequest, notFound, onlySent } from "@/lib/api";
 import { medicineSchema, scheduleProblem } from "@/lib/schemas";
 import { findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { scheduleChanged, toMedicineData } from "@/lib/medicines-server";
-import { currentScheduleFrom, parseTimes } from "@/lib/types";
+import { currentScheduleFrom, parseTimes, parseWeekdays } from "@/lib/types";
 import { publish } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
@@ -22,9 +22,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     const merged = {
       mode: (sent.mode ?? existing.mode) as string | null,
+      kind: sent.kind ?? existing.kind,
       doseAmount: "doseAmount" in sent ? sent.doseAmount : existing.doseAmount,
       times: "times" in sent ? sent.times : parseTimes(existing.times),
       intervalH: "intervalH" in sent ? sent.intervalH : existing.intervalH,
+      weekdays: "weekdays" in sent ? sent.weekdays : parseWeekdays(existing.weekdays),
+      everyDays: "everyDays" in sent ? sent.everyDays : existing.everyDays,
+      maxDays: "maxDays" in sent ? sent.maxDays : existing.maxDays,
+      minDays: "minDays" in sent ? sent.minDays : existing.minDays,
+      dueOn: "dueOn" in sent ? sent.dueOn : existing.dueOn,
       startsOn: "startsOn" in sent ? sent.startsOn : existing.startsOn,
       endsOn: "endsOn" in sent ? sent.endsOn : existing.endsOn,
     };
@@ -47,6 +53,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             doseAmount: existing.doseAmount,
             times: existing.times,
             intervalH: existing.intervalH,
+            weekdays: existing.weekdays,
+            everyDays: existing.everyDays,
             startsOn: existing.startsOn,
             endsOn: existing.endsOn,
             minIntervalMin: existing.minIntervalMin,

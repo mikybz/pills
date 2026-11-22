@@ -10,7 +10,7 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
 - `npm run dev` — dev server (set `AUTH_DEV_BYPASS=true` in `.env` to skip login; a
   `devUser=anna` cookie then signs that browser in as a second user, for sharing)
 - `npm run build` / `npm run lint`
-- `npm test` (`npx vitest run`) — unit tests (access gate, schedule, day window, drift, dose check, migration guess,
+- `npm test` (`npx vitest run`) — unit tests (access gate, schedule, day window, drift, day rules, care tasks, dose check, migration guess,
   timezone math, reminder text, live text)
 - `npx prisma migrate dev` — apply/create migrations (SQLite)
 
@@ -24,6 +24,15 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   (`inSleep`, `spreadTimes`, `fitTimes`). Used identically by the client (checklist,
   history), the API (assigns `DoseLog.slotAt` on write through `slotForLog` — the server
   is the source of truth) and the reminder tick.
+- **Kinds & care** (PLAN.md §15) — a `Medicine` row is any tracked item: `kind` medicine | task |
+  measure (one number in `unit`). Pure **`lib/care.ts`**: modes `flex` (at the latest every
+  `maxDays`, optional `minDays`, counted in local days from the last log of any status) and
+  `once` (`dueOn` + optional `times[0]`); states early/ok/soon/today/overdue/done, daily nudge
+  events at `User.careRemindTime`. Fixed schedules may have a day rule (`weekdays` 0 = Mon,
+  or `everyDays` from `startsOn`); `spanDays` scales every fixed-mode look-around — never
+  hard-code ±2 days. Care items have no slots (`slotAt` null); `GET /api/medicines` adds
+  `lastLogAt`; a new flex task's "last done" is `lastDoneAt` on create (first log, no notice).
+  Reminder sync runs per group (`doses` / `care`) so one never re-shows the other. Measurements skip the dose check; amount 0 is allowed only for them.
 - **Day window** — `Person.wakeTime` / `bedTime` ("HH:MM" wall clock, may wrap midnight,
   6–23 h awake). `scheduleOf(medicine, person)` puts it on the `Schedule` as `day`
   (null when `Medicine.aroundTheClock`) and `drift` (`Medicine.driftEnabled`); stored
@@ -49,7 +58,9 @@ Product spec lives in **PLAN.md** — read it before changing behavior.
   **One notification per person** (tag `reminders:<personId>`) listing every open slot;
   `collect()` in `lib/reminders.ts` computes events and open slots. After doses are
   logged / edited / undone `live.ts` queues `syncReminderNotifications` (10 s): `close` /
-  `update` pushes that the SW applies by tag (never a new alert). Chrome shows its own "tap to copy the URL"
+  `update` pushes that the SW applies by tag (never a new alert). Tasks / to-dos have their own
+  notification per person (tag `care:<personId>`, ReminderLog kind `care`, `slotAt` = cycle)
+  with a Done action; built by `collectCare()` / `carePayload()`. Chrome shows its own "tap to copy the URL"
   notification for any push that leaves nothing on screen, so the logging device closes its
   reminder locally and sends `X-Push-Endpoint`; the server skips its `close` push. A new route that writes
   doses must call `doseCreated()` / `doseChanged()` so this runs.

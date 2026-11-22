@@ -88,3 +88,18 @@ describe("shortName", () => {
     expect(shortName("  ", null)).toBe("?");
   });
 });
+
+describe("tasks and measurements", () => {
+  const en = translatorFor("en");
+  const nb = translatorFor("nb");
+  const bamse = { id: "p-b", name: "Bamse", selfOfUserId: null };
+  it("tasks are marked done, readings are logged", () => {
+    const task = item({ medicineName: "Cut claws", itemKind: "task", form: "other", slotAt: null });
+    expect(loggedLines(en.t, "en", batch([task], bamse), "u-me")).toEqual(["Anna marked Cut claws done for Bamse"]);
+    expect(loggedLines(nb.t, "nb", batch([task], bamse), "u-me")).toEqual(["Anna har gjort Cut claws for Bamse"]);
+    const weight = item({ medicineName: "Weight", itemKind: "measure", amount: 31.4, unit: "kg", slotAt: null });
+    expect(loggedLines(en.t, "en", batch([weight], bamse), "u-me")).toEqual(["Anna logged Weight for Bamse"]);
+    expect(loggedDetail(en.t, "en", weight, at, "Europe/Oslo")).toBe("31.4 kg · 14:05");
+    expect(loggedDetail(en.t, "en", task, at, "Europe/Oslo")).toBe("14:05");
+  });
+});

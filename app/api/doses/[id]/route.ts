@@ -4,6 +4,7 @@ import { withUser, readJson, badRequest, notFound, onlySent } from "@/lib/api";
 import { doseSchema } from "@/lib/schemas";
 import { findAccessibleDose, findAccessibleMedicineWithPerson } from "@/lib/persons";
 import { logsAround, resolveSlot } from "@/lib/doses-server";
+import { kindOf } from "@/lib/types";
 import { doseChanged } from "@/lib/live";
 
 type Params = { params: Promise<{ id: string }> };
@@ -17,6 +18,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const parsed = doseSchema.partial().omit({ medicineId: true }).safeParse(body);
     if (!parsed.success) return badRequest(parsed.error.message);
     const { slotAt: requested, ...data } = onlySent(parsed.data, body);
+    if (data.amount !== undefined && data.amount <= 0) {
+      const med = await findAccessibleMedicineWithPerson(user.id, existing.medicineId);
+      if (!med || kindOf(med) !== "measure") return badRequest("amount must be positive");
+    }
 
     // Changing the time re-assigns the slot (window rule), unless a slot was sent.
     let slotAt: Date | null | undefined;

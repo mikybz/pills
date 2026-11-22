@@ -10,6 +10,8 @@ import { loggedLines, shortName, type LoggedBatch, type LoggedItem, type LoggedS
 import { pushConfigured, sendToUser } from "@/lib/push";
 import { syncReminderNotifications } from "@/lib/reminders";
 import { translatorFor } from "@/lib/reminder-text";
+import { isCare } from "@/lib/schedule";
+import { kindOf } from "@/lib/types";
 
 /** What the client hears. Sent only to users with access to `personId`. */
 export type LiveEvent =
@@ -27,7 +29,13 @@ interface Envelope {
   event: LiveEvent;
 }
 
-const g = globalThis as unknown as { __pillsLive?: EventEmitter; __pillsNotices?: Map<string, Notice>; __pillsSyncs?: Map<string, { timer: ReturnType<typeof setTimeout> }> };
+type SyncGroup = "doses" | "care";
+
+const g = globalThis as unknown as {
+  __pillsLive?: EventEmitter;
+  __pillsNotices?: Map<string, Notice>;
+  __pillsSyncs?: Map<string, { timer: ReturnType<typeof setTimeout>; groups: Set<SyncGroup> }>;
+};
 
 function bus() {
   if (!g.__pillsLive) {
@@ -70,7 +78,7 @@ type DoseRow = {
 export async function doseCreated(
   dose: DoseRow,
   by: { id: string; name: string | null; email: string },
-  medicine: { name: string; form: string; unit: string; personId: string },
+  medicine: { name: string; form: string; unit: string; personId: string; kind?: string; mode?: string | null },
   /** Push endpoint of the logging device (`X-Push-Endpoint`), if it sent one. */
   fromEndpoint?: string | null,
 ) {
@@ -89,6 +97,7 @@ export async function doseCreated(
           medicineId: dose.medicineId,
           medicineName: medicine.name,
           form: medicine.form,
+          itemKind: kindOf(medicine),
           amount: dose.amount,
           unit: medicine.unit,
           status: dose.status as LoggedStatus,
@@ -99,7 +108,7 @@ export async function doseCreated(
     };
     publish({ type: "doses", action: "created", personId: person.id, byUserId: by.id, batch });
     queueNotice(person.id, by.id, dose.id);
-    queueReminderSync(person.id, fromEndpoint);
+    queueReminderSync(person.id, isCare(medicine.mode) ? "care" : "doses", fromEndpoint);
   } catch (e) {
     console.error("[live] doseCreated failed", e);
   }
@@ -154,7 +163,7 @@ async function sendNotice(personId: string, byUserId: string, doseIds: string[])
   const [doses, by, person] = await Promise.all([
     prisma.doseLog.findMany({
       where: { id: { in: doseIds } },
-      include: { medicine: { select: { name: true, form: true, unit: true } } },
+      include: { medicine: { select: { name: true, form: true, unit: true, kind: true } } },
       orderBy: { takenAt: "asc" },
     }),
     prisma.user.findUnique({ where: { id: byUserId }, select: { id: true, name: true, email: true } }),
@@ -169,6 +178,7 @@ async function sendNotice(personId: string, byUserId: string, doseIds: string[])
       medicineId: d.medicineId,
       medicineName: d.medicine.name,
       form: d.medicine.form,
+      itemKind: kindOf(d.medicine),
       amount: d.amount,
       unit: d.medicine.unit,
       status: d.status as LoggedStatus,
@@ -203,29 +213,32 @@ async function sendNotice(personId: string, byUserId: string, doseIds: string[])
  * Doses changed for a person: after the undo window, close or shrink the reminder
  * notification on every device (`syncReminderNotifications`). One run per burst.
  */
-function queueReminderSync(personId: string, fromEndpoint?: string | null) {
+function queueReminderSync(personId: string, group: SyncGroup, fromEndpoint?: string | null) {
   const timers = (g.__pillsSyncs ??= new Map());
-  clearTimeout(timers.get(personId)?.timer);
+  const pending = timers.get(personId);
+  clearTimeout(pending?.timer);
+  // Only the notification the changed logs belong to: a pill log must not re-show the care one.
+  const groups = new Set<SyncGroup>([...(pending?.groups ?? []), group]);
   // Only the last write's device closed its notification with everything known.
   const endpoint = fromEndpoint ?? null;
   const timer = setTimeout(() => {
     timers.delete(personId);
-    void syncReminderNotifications(personId, Date.now(), endpoint).catch((e) =>
+    void syncReminderNotifications(personId, Date.now(), endpoint, groups).catch((e) =>
       console.error("[live] reminder sync failed", e),
     );
   }, NOTICE_DELAY_MS);
   (timer as { unref?: () => void }).unref?.();
-  timers.set(personId, { timer });
+  timers.set(personId, { timer, groups });
 }
 
 /** An edited or removed dose (the medicine still exists, so its person is known). */
 export function doseChanged(action: "updated" | "deleted", dose: { id: string; medicineId: string }, byUserId: string) {
   void prisma.medicine
-    .findUnique({ where: { id: dose.medicineId }, select: { personId: true } })
+    .findUnique({ where: { id: dose.medicineId }, select: { personId: true, mode: true } })
     .then((m) => {
       if (!m) return;
       publish({ type: "doses", action, personId: m.personId, byUserId, doseId: dose.id });
-      queueReminderSync(m.personId);
+      queueReminderSync(m.personId, isCare(m.mode) ? "care" : "doses");
     })
     .catch((e) => console.error("[live] doseChanged failed", e));
 }

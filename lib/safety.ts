@@ -7,10 +7,13 @@
  *   minGap ago. No daily-max math.
  * - As needed: max per intake, minimum interval, and max per "day", where the
  *   day is a rolling window of 24 h minus slack (wake-up times vary).
+ * - Care (flex / once): done again sooner than `minDays` local days, or a one-off
+ *   that is already done.
  */
 import {
   HOUR,
   MIN,
+  isCare,
   isScheduled,
   isTakenStatus,
   minGapFor,
@@ -18,6 +21,7 @@ import {
   type LogEntry,
   type Schedule,
 } from "./schedule";
+import { addDays, localDate } from "./tz";
 
 /** Slack subtracted from 24 h for the as-needed daily limit. Tune here. */
 export const AS_NEEDED_SLACK_H = 4;
@@ -35,7 +39,11 @@ export type Reason =
   | { code: "slotLogged"; takenAt: number }
   | { code: "tooSoon"; takenAt: number; minGapMin: number }
   | { code: "overIntake"; amount: number; max: number }
-  | { code: "overDaily"; used: number; amount: number; max: number; windowH: number };
+  | { code: "overDaily"; used: number; amount: number; max: number; windowH: number }
+  /** Flex care: last done at `takenAt`, meant at most every `minDays` days. */
+  | { code: "careEarly"; takenAt: number; minDays: number }
+  /** A one-off that is already done. */
+  | { code: "careDone"; takenAt: number };
 
 export interface CheckResult {
   level: "ok" | "warn";
@@ -63,12 +71,27 @@ export function checkDose(args: {
   req: DoseRequest;
   /** User setting; only affects the as-needed limits. */
   countUncertain: boolean;
+  /** Care: the last taken / uncertain log when it may be older than `logs` reach. */
+  lastTakenAt?: number | null;
 }): CheckResult {
   const { schedule, limits, logs, req, countUncertain } = args;
   if (req.status === "skipped") return { level: "ok", reasons: [] };
   const reasons: Reason[] = [];
 
-  if (isScheduled(schedule.mode)) {
+  if (isCare(schedule.mode)) {
+    const done = logs
+      .filter((l) => isTakenStatus(l.status) && l.takenAt <= req.at)
+      .reduce<number | null>((m, l) => (m === null || l.takenAt > m ? l.takenAt : m), null);
+    const extra = args.lastTakenAt != null && args.lastTakenAt <= req.at ? args.lastTakenAt : null;
+    const last = done === null ? extra : extra === null ? done : Math.max(done, extra);
+    if (last !== null && schedule.mode === "once") reasons.push({ code: "careDone", takenAt: last });
+    if (last !== null && schedule.mode === "flex" && schedule.minDays) {
+      const tz = schedule.timezone;
+      if (localDate(req.at, tz) < addDays(localDate(last, tz), schedule.minDays)) {
+        reasons.push({ code: "careEarly", takenAt: last, minDays: schedule.minDays });
+      }
+    }
+  } else if (isScheduled(schedule.mode)) {
     const inSlot =
       req.slotAt === null
         ? []

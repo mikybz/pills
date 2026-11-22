@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
+  Activity,
   Archive,
   ArchiveRestore,
   ChevronDown,
   ChevronUp,
   CircleHelp,
+  ClipboardCheck,
   LogOut,
   Pencil,
+  Pill,
   Plus,
   Shield,
   Sun,
@@ -28,6 +31,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MedicineDialog } from "@/components/medicine-dialog";
+import { CareDialog } from "@/components/care-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { HelpSheet } from "@/components/help-sheet";
 import { PeopleSection, PersonDialog } from "@/components/people-section";
 import { RemindersSection } from "@/components/reminders-section";
@@ -36,7 +46,19 @@ import { api } from "@/lib/client";
 import { describeSchedule } from "@/lib/describe";
 import { usePushSupport } from "@/lib/push-client";
 import { isFinished } from "@/lib/schedule";
-import { colorClasses, MEDICINE_COLORS, dayOf, personDayOf, scheduleOf, type MedicineDTO, type ProfileDTO } from "@/lib/types";
+import {
+  colorClasses,
+  MEDICINE_COLORS,
+  dayOf,
+  kindOf,
+  personDayOf,
+  scheduleOf,
+  type Kind,
+  type MedicineDTO,
+  type ProfileDTO,
+} from "@/lib/types";
+
+const KIND_ICONS = { medicine: Pill, task: ClipboardCheck, measure: Activity } as const;
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { useLiveRefresh } from "@/components/live-provider";
@@ -58,7 +80,8 @@ export function SettingsScreen() {
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   useLiveRefresh(personId, reload);
   const liveSound = useLiveSound();
-  const [editing, setEditing] = useState<MedicineDTO | null | "new">(null);
+  /** An item to edit, or the kind of a new one. */
+  const [editing, setEditing] = useState<MedicineDTO | { new: Kind } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [editingDay, setEditingDay] = useState(false);
 
@@ -169,9 +192,25 @@ export function SettingsScreen() {
           <h2 className="text-sm font-medium text-muted-foreground">
             {current ? t("people.medicinesFor", { name: current.name }) : t("settings.medicines")}
           </h2>
-          <Button size="sm" onClick={() => setEditing("new")}>
-            <Plus className="size-4" /> {t("medicine.new")}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground">
+              <Plus className="size-4" /> {t("settings.add")}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              {(["medicine", "task", "measure"] as const).map((k) => {
+                const Icon = KIND_ICONS[k];
+                return (
+                  <DropdownMenuItem key={k} onClick={() => setEditing({ new: k })}>
+                    <Icon className="size-4" />
+                    <span>
+                      <span className="block font-medium">{t(`settings.add_${k}`)}</span>
+                      <span className="block text-xs text-muted-foreground">{t(`settings.addHint_${k}`)}</span>
+                    </span>
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {current && (
           <button
@@ -189,12 +228,17 @@ export function SettingsScreen() {
         <Card className="gap-0 p-0">
           <ul className="divide-y">
             {active.map((m, i) => {
-              const finished = isFinished(scheduleOf(m, person), now);
+              // A done one-off is finished like a course that ended.
+              const finished = isFinished(scheduleOf(m, person), now) || (m.mode === "once" && !!m.lastLogAt);
+              const Icon = KIND_ICONS[kindOf(m)];
               return (
                 <li key={m.id} className={cn("flex items-center gap-1 py-3 pl-4 pr-2", m.hidden && "opacity-60")}>
                   <span className={cn("mr-1 size-3 shrink-0 rounded-full", (colorClasses[m.color] ?? colorClasses.blue).dot)} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{m.name}</span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-label={t(`settings.kind_${kindOf(m)}`)} />
+                      <span className="truncate">{m.name}</span>
+                    </span>
                     <span className="block text-xs text-muted-foreground">
                       {describeSchedule(m, t, locale)}
                       {m.mode && !m.scheduleReviewedAt && <> · {t("review.needsReview")}</>}
@@ -202,7 +246,9 @@ export function SettingsScreen() {
                     </span>
                     {finished && (
                       <span className="mt-1 flex items-center gap-2 text-xs">
-                        <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{t("settings.finished")}</span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 font-medium">
+                          {t(m.mode === "once" ? "settings.done" : "settings.finished")}
+                        </span>
                         <Button size="xs" variant="outline" onClick={() => archive(m.id)}>
                           <Archive className="size-3" /> {t("medicine.archive")}
                         </Button>
@@ -343,9 +389,27 @@ export function SettingsScreen() {
         </p>
       </section>
 
-      {editing !== null && (
+      {editing !== null && ("new" in editing ? editing.new : kindOf(editing)) !== "medicine" && (
+        <CareDialog
+          item={"new" in editing ? null : editing}
+          kind={("new" in editing ? editing.new : kindOf(editing)) as "task" | "measure"}
+          personId={personId}
+          timeZone={timeZone}
+          showReminderSwitch={support === "supported" && profile.remindersOn}
+          defaultColor={
+            MEDICINE_COLORS.find((c) => !active.some((m) => m.color === c)) ??
+            MEDICINE_COLORS[active.length % MEDICINE_COLORS.length]
+          }
+          onClose={() => setEditing(null)}
+          onChanged={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+      {editing !== null && ("new" in editing ? editing.new : kindOf(editing)) === "medicine" && (
         <MedicineDialog
-          medicine={editing === "new" ? null : editing}
+          medicine={"new" in editing ? null : editing}
           personId={personId}
           timeZone={timeZone}
           day={dayOf(person)}
