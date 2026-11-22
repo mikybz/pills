@@ -13,14 +13,19 @@ export async function GET(req: NextRequest) {
     const includeArchived = sp.get("archived") === "true";
     const personId = await resolvePersonId(user, sp.get("personId"));
     if (!personId) return notFound();
-    const medicines = await prisma.medicine.findMany({
-      where: { personId, ...(includeArchived ? {} : { archivedAt: null }) },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-      ...(sp.get("versions") === "true"
-        ? { include: { scheduleVersions: { orderBy: { validFrom: "asc" } } } }
-        : {}),
-    });
-    return NextResponse.json(medicines);
+    const [medicines, last] = await Promise.all([
+      prisma.medicine.findMany({
+        where: { personId, ...(includeArchived ? {} : { archivedAt: null }) },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        ...(sp.get("versions") === "true"
+          ? { include: { scheduleVersions: { orderBy: { validFrom: "asc" } } } }
+          : {}),
+      }),
+      // Care schedules count from the last log, which can be older than any loaded range.
+      prisma.doseLog.groupBy({ by: ["medicineId"], where: { medicine: { personId } }, _max: { takenAt: true } }),
+    ]);
+    const lastBy = new Map(last.map((r) => [r.medicineId, r._max.takenAt]));
+    return NextResponse.json(medicines.map((m) => ({ ...m, lastLogAt: lastBy.get(m.id) ?? null })));
   });
 }
 
@@ -47,6 +52,19 @@ export async function POST(req: NextRequest) {
         scheduleReviewedAt: new Date(),
       },
     });
+    // A new regular task counts from when it was last done: its first log. It is
+    // set-up data, so it goes out as a medicines change, not as "Anna did … just now".
+    if (parsed.data.lastDoneAt && medicine.mode === "flex") {
+      await prisma.doseLog.create({
+        data: {
+          userId: user.id,
+          medicineId: medicine.id,
+          amount: 1,
+          takenAt: new Date(Math.min(parsed.data.lastDoneAt.getTime(), Date.now())),
+          status: "taken",
+        },
+      });
+    }
     publish({ type: "medicines", personId: personId, byUserId: user.id });
     return NextResponse.json(medicine, { status: 201 });
   });

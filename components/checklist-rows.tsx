@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { Check, Ellipsis, Minus } from "lucide-react";
+import { CalendarClock, Check, Ellipsis, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -10,13 +10,24 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDose, formatDuration, formatTime } from "@/lib/format";
+import type { CareStatus } from "@/lib/care";
+import { formatDaysAgo, formatDose, formatDuration, formatLocalDate, formatTime } from "@/lib/format";
 import type { LogEntry, Slot } from "@/lib/schedule";
-import { colorClasses, doseAmountOf, type MedicineDTO } from "@/lib/types";
+import { colorClasses, doseAmountOf, kindOf, verbKind, type MedicineDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** Messages pick their verb by form: "Apply" for creams, "Take" otherwise. */
-const verbForm = (m: Pick<MedicineDTO, "form">) => (m.form === "cream" ? "cream" : "other");
+/** Messages pick their verb by kind and form: Apply (creams), Done (tasks), Log (measurements), Take. */
+const verbForm = (m: Pick<MedicineDTO, "form" | "kind">) => verbKind(m);
+
+/** The amount line of a row: a dose ("1 tablet"); nothing for tasks and measurements. */
+function amountOf(m: MedicineDTO, t: ReturnType<typeof useTranslations>) {
+  return kindOf(m) === "medicine" ? formatDose(doseAmountOf(m), m.unit, t) : null;
+}
+
+/** A logged amount: the dose, the reading ("31.4 kg"), or "done" for a task. */
+export function loggedAmount(m: MedicineDTO, amount: number, t: ReturnType<typeof useTranslations>) {
+  return kindOf(m) === "task" ? t("care.doneWord") : formatDose(amount, m.unit, t);
+}
 
 export function Section({ title, children, tone }: { title: string; children: React.ReactNode; tone?: "alert" }) {
   return (
@@ -77,14 +88,16 @@ function Name({
 }) {
   const t = useTranslations();
   const colors = colorClasses[medicine.color] ?? colorClasses.blue;
+  const amount = amountOf(medicine, t);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2.5">
       <span className={cn("h-8 w-1 shrink-0 rounded-full", colors.dot)} aria-hidden />
       <span className="min-w-0">
         <span className="block truncate font-medium">{medicine.name}</span>
         <span className="block text-xs text-muted-foreground">
-          {formatDose(doseAmountOf(medicine), medicine.unit, t)}
-          {sub && <> · {sub}</>}
+          {amount}
+          {amount && sub && " · "}
+          {sub}
         </span>
         {slot && <MovedReason slot={slot} />}
       </span>
@@ -255,7 +268,7 @@ export function DoneRow({
           <span className="min-w-0">
             <span className={cn("block truncate", skipped && "text-muted-foreground")}>{medicine.name}</span>
             <span className="block truncate text-xs text-muted-foreground">
-              {formatDose(log.amount, medicine.unit, t)}
+              {loggedAmount(medicine, log.amount, t)}
               {log.status === "uncertain" && <> · {t("history.uncertain")}</>}
               {skipped && <> · {t("history.skipped")}</>}
               {loggedBy && <> · {t("people.loggedBy", { name: loggedBy })}</>}
@@ -263,6 +276,115 @@ export function DoneRow({
           </span>
         </span>
       </button>
+      <MoreButton onClick={onMore} />
+    </li>
+  );
+}
+
+/** "3 days left", "due today", "2 days overdue", "tomorrow 10:30", "Wed 3 Dec · in 11 days". */
+export function careDueText(
+  status: CareStatus,
+  /** A one-off (once mode): days ahead name the date. */
+  once: boolean,
+  t: ReturnType<typeof useTranslations>,
+  locale: string,
+  timeZone: string,
+): { text: string; alert: boolean } {
+  const time = status.dueAt !== null ? formatTime(status.dueAt, locale, timeZone) : null;
+  const d = status.daysLeft;
+  if (d < 0) return { text: t("care.overdue", { count: -d }), alert: true };
+  if (d === 0) return { text: time ? t("care.todayAt", { time }) : t("care.dueToday"), alert: true };
+  if (d === 1 && time) return { text: t("care.tomorrowAt", { time }), alert: false };
+  if (once && d > 1) return { text: t("care.onDate", { date: formatLocalDate(status.dueDate, locale), count: d }), alert: false };
+  if (once) return { text: t("care.tomorrow"), alert: false };
+  return { text: t("care.daysLeft", { count: d }), alert: false };
+}
+
+/** "last done 4 days ago" / "not done yet" (flex only; one-offs have no history). */
+function lastDoneText(medicine: MedicineDTO, status: CareStatus, now: number, t: ReturnType<typeof useTranslations>, locale: string, timeZone: string) {
+  if (medicine.mode !== "flex") return null;
+  if (status.lastAt === null) return t(kindOf(medicine) === "measure" ? "care.neverMeasured" : "care.neverDone");
+  return t(kindOf(medicine) === "measure" ? "care.lastMeasured" : "care.lastDone", { when: formatDaysAgo(status.lastAt, now, locale, timeZone, t) });
+}
+
+/** A task / to-do / measurement on Due now: its deadline, and Done (or Log for a measurement). */
+export function CareDueRow({
+  medicine,
+  status,
+  timeZone,
+  now,
+  onDone,
+  onMore,
+}: {
+  medicine: MedicineDTO;
+  status: CareStatus;
+  timeZone: string;
+  now: number;
+  onDone: () => void;
+  onMore: () => void;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const due = careDueText(status, medicine.mode === "once", t, locale, timeZone);
+  const last = lastDoneText(medicine, status, now, t, locale, timeZone);
+  return (
+    <li className="flex items-center gap-3 py-2.5 pl-4 pr-2">
+      <span className="flex w-12 shrink-0 justify-center text-muted-foreground" aria-hidden>
+        <CalendarClock className="size-5" />
+      </span>
+      <Name
+        medicine={medicine}
+        sub={
+          <>
+            <span className={cn(due.alert && "font-medium text-amber-700 dark:text-amber-400")}>{due.text}</span>
+            {last && <> · {last}</>}
+          </>
+        }
+      />
+      <Button className="h-10 px-4" onClick={onDone}>
+        {t("home.take", { form: verbForm(medicine) })}
+      </Button>
+      <MoreButton onClick={onMore} />
+    </li>
+  );
+}
+
+/** A task that isn't due yet (Tasks section): when it is due, and a quiet Done. */
+export function CareRow({
+  medicine,
+  status,
+  timeZone,
+  now,
+  highlight,
+  onDone,
+  onMore,
+}: {
+  medicine: MedicineDTO;
+  status: CareStatus;
+  timeZone: string;
+  now: number;
+  highlight?: boolean;
+  onDone: () => void;
+  onMore: () => void;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const due = careDueText(status, medicine.mode === "once", t, locale, timeZone);
+  const last = lastDoneText(medicine, status, now, t, locale, timeZone);
+  return (
+    <li className={cn("flex items-center gap-3 py-2.5 pl-4 pr-2 transition-colors duration-700", highlight && "bg-teal-500/15")}>
+      <Name
+        medicine={medicine}
+        sub={
+          <>
+            {last && <>{last} · </>}
+            {due.text}
+          </>
+        }
+      />
+      <Button size="sm" variant="outline" onClick={onDone}>
+        {t("home.take", { form: verbForm(medicine) })}
+      </Button>
       <MoreButton onClick={onMore} />
     </li>
   );

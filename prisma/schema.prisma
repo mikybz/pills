@@ -18,6 +18,8 @@ model User {
   remindLeadMin  Int        @default(10)
   nagEveryMin    Int        @default(15)
   nagMaxMin      Int        @default(120)
+  /// Wall-clock time ("HH:MM", person's zone) of the daily nudge for tasks and to-dos.
+  careRemindTime String     @default("17:00")
   onboarded      Boolean    @default(false)
   defaultPersonId String?
   defaultPerson   Person?    @relation("DefaultPerson", fields: [defaultPersonId], references: [id], onDelete: SetNull)
@@ -89,6 +91,8 @@ model Medicine {
   personId       String
   person         Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
   name           String
+  /// "medicine" | "task" (care task / to-do: no amount) | "measure" (logs one number in `unit`).
+  kind           String    @default("medicine")
   form           String    @default("pill")
   unit           String    @default("mg")
   color          String    @default("blue")
@@ -101,6 +105,16 @@ model Medicine {
   doseAmount     Float?
   times          String?
   intervalH      Float?
+  /// Fixed mode day rule: JSON array of weekdays (0 = Monday … 6 = Sunday); null = every day.
+  weekdays       String?
+  /// Fixed mode day rule: every N days counted from `startsOn` (required then).
+  everyDays      Int?
+  /// Flex mode: due at the latest N local days after it was last done.
+  maxDays        Int?
+  /// Flex mode: doing it again before N days have passed warns.
+  minDays        Int?
+  /// Once mode: the local date it is due ("YYYY-MM-DD"); an optional time is `times[0]`.
+  dueOn          String?
   startsOn       String?
   endsOn         String?
   remindersEnabled Boolean @default(true)
@@ -151,6 +165,8 @@ model ScheduleVersion {
   doseAmount     Float?
   times          String?
   intervalH      Float?
+  weekdays       String?
+  everyDays      Int?
   startsOn       String?
   endsOn         String?
   minIntervalMin Int?

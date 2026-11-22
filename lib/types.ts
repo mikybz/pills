@@ -8,6 +8,8 @@ export interface ScheduleVersionDTO {
   doseAmount: number | null;
   times: string | null;
   intervalH: number | null;
+  weekdays?: string | null;
+  everyDays?: number | null;
   startsOn: string | null;
   endsOn: string | null;
   minIntervalMin: number | null;
@@ -26,7 +28,39 @@ export type MedicineDTO = Omit<
   scheduleChangedAt: string | null;
   /** Included with `?versions=true`. */
   scheduleVersions?: ScheduleVersionDTO[];
+  /** The latest log of any status (care schedules count from it), from `GET /api/medicines`. */
+  lastLogAt?: string | null;
 };
+
+/** What an item is: a medicine (doses), a task (done / not done) or a measurement (a number). */
+export const KINDS = ["medicine", "task", "measure"] as const;
+export type Kind = (typeof KINDS)[number];
+
+export function kindOf(m: { kind?: string | null }): Kind {
+  return m.kind === "task" || m.kind === "measure" ? m.kind : "medicine";
+}
+
+/**
+ * The verb family messages select on (`{form, select, …}`): creams are applied,
+ * tasks are done, measurements are logged, everything else is taken.
+ */
+export function verbKind(m: { kind?: string | null; form: string }): "cream" | "task" | "measure" | "other" {
+  const kind = kindOf(m);
+  if (kind !== "medicine") return kind;
+  return m.form === "cream" ? "cream" : "other";
+}
+
+/** Weekdays of a fixed day rule (0 = Monday … 6 = Sunday). */
+export function parseWeekdays(json: string | null | undefined): number[] | null {
+  if (!json) return null;
+  try {
+    const w = JSON.parse(json);
+    const days = Array.isArray(w) ? w.filter((x) => Number.isInteger(x) && x >= 0 && x <= 6) : [];
+    return days.length ? [...new Set<number>(days)].sort((a, b) => a - b) : null;
+  } catch {
+    return null;
+  }
+}
 
 export type DoseDTO = Omit<DoseLog, "takenAt" | "slotAt" | "createdAt" | "updatedAt"> & {
   takenAt: string;
@@ -104,7 +138,13 @@ export function parseTimes(json: string | null | undefined): string[] {
 type ScheduleFields = Pick<
   MedicineDTO,
   "mode" | "times" | "intervalH" | "startsOn" | "endsOn" | "minIntervalMin"
->;
+> &
+  Partial<Pick<MedicineDTO, "maxDays" | "minDays" | "dueOn">> & {
+    weekdays?: string | null;
+    everyDays?: number | null;
+  };
+
+const MODE_NAMES: Mode[] = ["fixed", "interval", "asNeeded", "flex", "once"];
 
 /** What schedule math needs from a person: the time zone and the day window. */
 export interface PersonDay {
@@ -136,13 +176,18 @@ export function personDayOf(p: Partial<PersonDay> | null | undefined): PersonDay
 function baseSchedule(m: ScheduleFields, timezone: string): Omit<Schedule, "day" | "drift"> {
   const mode = (m.mode ?? "asNeeded") as Mode;
   return {
-    mode: mode === "fixed" || mode === "interval" ? mode : "asNeeded",
+    mode: MODE_NAMES.includes(mode) ? mode : "asNeeded",
     times: parseTimes(m.times),
     intervalH: m.intervalH ?? null,
     startsOn: m.startsOn ?? null,
     endsOn: m.endsOn ?? null,
     minIntervalMin: m.minIntervalMin ?? null,
     timezone,
+    weekdays: parseWeekdays(m.weekdays),
+    everyDays: m.everyDays ?? null,
+    maxDays: m.maxDays ?? null,
+    minDays: m.minDays ?? null,
+    dueOn: m.dueOn ?? null,
   };
 }
 

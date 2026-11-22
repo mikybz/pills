@@ -28,9 +28,11 @@ import { api } from "@/lib/client";
 import { formatAmount, formatDay, formatDose, formatDuration, formatMonth, formatTime } from "@/lib/format";
 import { DAY, historySlots, isScheduled, MIN, type HistorySlot, type LogEntry } from "@/lib/schedule";
 import { addDays, localDate, startOfLocalDay, weekdayMon0 } from "@/lib/tz";
+import { loggedAmount } from "@/components/checklist-rows";
 import {
   colorClasses,
   doseAmountOf,
+  kindOf,
   personDayOf,
   segmentsOf,
   toLogEntries,
@@ -198,7 +200,13 @@ export function HistoryScreen() {
     [filtered, slotsByMed, visibleDoses],
   );
   const hasScheduledView = slotsByMed.size > 0;
-  const asNeededMeds = laneMeds.filter((m) => !isScheduled(m.mode));
+  // Dose totals are about medicines; tasks are in the lanes and the day list, readings get their own chart.
+  const asNeededMeds = laneMeds.filter((m) => !isScheduled(m.mode) && kindOf(m) === "medicine");
+  const medicineDoses = useMemo(
+    () => visibleDoses.filter((d) => kindOf(medById.get(d.medicineId) ?? {}) === "medicine"),
+    [visibleDoses, medById],
+  );
+  const measureMeds = laneMeds.filter((m) => kindOf(m) === "measure");
   const selectedMed = medicineFilter === "all" ? null : medById.get(medicineFilter);
   const exportUrl = (format: string) => `/api/export?format=${format}&personId=${encodeURIComponent(personId ?? "")}`;
 
@@ -280,14 +288,14 @@ export function HistoryScreen() {
           {range === "month" &&
             (hasScheduledView ? (
               <MonthCalendar start={rangeStart} today={today} tz={tz} slotsByMed={slotsByMed} locale={locale} />
-            ) : (
+            ) : medicineDoses.length === 0 ? null : (
               <AggregateBars
                 byDay
                 start={rangeStart}
                 now={now}
                 tz={tz}
-                doses={visibleDoses}
-                medicines={laneMeds}
+                doses={medicineDoses}
+                medicines={laneMeds.filter((m) => kindOf(m) === "medicine")}
                 locale={locale}
                 unitLabel={selectedMed ? selectedMed.unit : t("history.doses")}
                 byAmount={!!selectedMed}
@@ -314,6 +322,19 @@ export function HistoryScreen() {
               )}
             </>
           )}
+
+          {measureMeds.map((m) => (
+            <MeasureChart
+              key={m.id}
+              medicine={m}
+              doses={visibleDoses.filter((d) => d.medicineId === m.id && d.status !== "skipped")}
+              start={rangeStart}
+              now={now}
+              tz={tz}
+              locale={locale}
+              onSelect={setEditing}
+            />
+          ))}
 
           {laneMeds.length >= 2 && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -467,7 +488,8 @@ function DayList({
                           style={{ borderColor: (colorClasses[m.color] ?? colorClasses.blue).chart }}
                         />
                         <span className="min-w-0 flex-1 truncate">
-                          {m.name} <span className="text-muted-foreground">{formatDose(doseAmountOf(m), m.unit, t)}</span>
+                          {m.name}{" "}
+                          {kindOf(m) === "medicine" && <span className="text-muted-foreground">{formatDose(doseAmountOf(m), m.unit, t)}</span>}
                         </span>
                         <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
                           {t("history.missedBadge")}
@@ -496,7 +518,7 @@ function DayList({
                     <span className={cn("size-2.5 shrink-0 rounded-full", colors.dot, d.status === "uncertain" && "opacity-45")} />
                     <span className="min-w-0 flex-1">
                       <span className={cn("block truncate", d.status === "skipped" && "text-muted-foreground")}>
-                        {m?.name} <span className="text-muted-foreground">{m ? formatDose(d.amount, m.unit, t) : formatAmount(d.amount)}</span>
+                        {m?.name} <span className="text-muted-foreground">{m ? loggedAmount(m, d.amount, t) : formatAmount(d.amount)}</span>
                       </span>
                       {d.note && <span className="block truncate text-xs text-muted-foreground">{d.note}</span>}
                       {d.loggedBy && meId && d.loggedBy.id !== meId && (
@@ -513,7 +535,7 @@ function DayList({
                     {d.status === "taken" && late > LATE_SHOWN_MS && (
                       <span className="text-xs text-muted-foreground">{t("home.late", { duration: formatDuration(late, t) })}</span>
                     )}
-                    {d.status === "taken" && m && !isScheduled(m.mode) && (
+                    {d.status === "taken" && m && !isScheduled(m.mode) && kindOf(m) === "medicine" && (
                       <span className="text-xs text-muted-foreground">{t("history.asNeededBadge")}</span>
                     )}
                   </button>
@@ -614,14 +636,14 @@ function TimelineChart({
                       key={d.id}
                       cx={cx}
                       cy={cy}
-                      r={5 + (d.amount / laneMax.get(m.id)!) * 4}
+                      r={kindOf(m) === "medicine" ? 5 + (d.amount / laneMax.get(m.id)!) * 4 : 6}
                       fill={color}
                       opacity={d.status === "uncertain" ? 0.45 : 1}
                       className="cursor-pointer stroke-background"
                       strokeWidth={2}
                       onClick={() => onSelect(d)}
                       onMouseEnter={(e) =>
-                        hover(e, cx, cy, [`${m.name} · ${formatDose(d.amount, m.unit, t)}`, `${formatDay(time, locale, tz)} ${formatTime(time, locale, tz)}`])
+                        hover(e, cx, cy, [`${m.name} · ${loggedAmount(m, d.amount, t)}`, `${formatDay(time, locale, tz)} ${formatTime(time, locale, tz)}`])
                       }
                       onMouseLeave={() => setTip(null)}
                     />
@@ -942,6 +964,110 @@ function AggregateBars({
             </g>
           );
         })}
+      </svg>
+      {tip && <ChartTooltip tip={tip} />}
+    </Card>
+  );
+}
+
+/* ---------- measurements: the readings over the range ---------- */
+
+function MeasureChart({
+  medicine,
+  doses,
+  start,
+  now,
+  tz,
+  locale,
+  onSelect,
+}: {
+  medicine: MedicineDTO;
+  doses: DoseDTO[];
+  start: number;
+  now: number;
+  tz: string;
+  locale: string;
+  onSelect: (d: DoseDTO) => void;
+}) {
+  const t = useTranslations();
+  const [tip, setTip] = useState<TooltipState | null>(null);
+  const points = useMemo(
+    () => doses.map((d) => ({ d, at: Date.parse(d.takenAt), v: d.amount })).sort((a, b) => a.at - b.at),
+    [doses],
+  );
+  if (!points.length) return null;
+  // Drawn at about phone width so the labels stay legible.
+  const W = 360;
+  const H = 140;
+  const PAD = { l: 38, r: 8, t: 10, b: 20 };
+  const values = points.map((p) => p.v);
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  if (hi - lo < 1e-9) {
+    lo -= 1;
+    hi += 1;
+  }
+  const span = hi - lo;
+  lo -= span * 0.1;
+  hi += span * 0.1;
+  const x = (at: number) => PAD.l + ((at - start) / Math.max(1, now - start)) * (W - PAD.l - PAD.r);
+  const y = (v: number) => PAD.t + (1 - (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
+  const color = (colorClasses[medicine.color] ?? colorClasses.blue).chart;
+  const last = points[points.length - 1];
+  const fmt = (v: number) => formatDose(v, medicine.unit, t);
+  const ticks = [lo + (hi - lo) * 0.1, (lo + hi) / 2, hi - (hi - lo) * 0.1];
+  const hover = (e: React.MouseEvent<SVGElement>, cx: number, cy: number, lines: string[]) => {
+    const rect = e.currentTarget.closest("svg")!.getBoundingClientRect();
+    setTip({ x: (cx / W) * rect.width, y: (cy / H) * rect.height, lines });
+  };
+  return (
+    <Card className="relative gap-1 p-3">
+      <div className="flex items-baseline justify-between gap-2 text-sm">
+        <span className="font-medium">{medicine.name}</span>
+        <span className="text-muted-foreground">
+          {t("history.latestReading", { value: fmt(last.v), when: formatDay(last.at, locale, tz) })}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={medicine.name}>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} className="stroke-border" strokeWidth={1} strokeDasharray="2 4" />
+            <text x={PAD.l - 6} y={y(v) + 4} textAnchor="end" className="fill-muted-foreground" fontSize={11}>
+              {formatAmount(Math.round(v * 10) / 10)}
+            </text>
+          </g>
+        ))}
+        <text x={PAD.l} y={H - 6} className="fill-muted-foreground" fontSize={11}>
+          {formatDay(start, locale, tz)}
+        </text>
+        <text x={W - PAD.r} y={H - 6} textAnchor="end" className="fill-muted-foreground" fontSize={11}>
+          {formatDay(now, locale, tz)}
+        </text>
+        {points.length > 1 && (
+          <polyline
+            points={points.map((p) => `${x(p.at)},${y(p.v)}`).join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+        )}
+        {points.map((p) => (
+          <circle
+            key={p.d.id}
+            cx={x(p.at)}
+            cy={y(p.v)}
+            r={4.5}
+            fill={color}
+            className="cursor-pointer stroke-background"
+            strokeWidth={2}
+            onClick={() => onSelect(p.d)}
+            onMouseEnter={(e) =>
+              hover(e, x(p.at), y(p.v), [fmt(p.v), `${formatDay(p.at, locale, tz)} ${formatTime(p.at, locale, tz)}`])
+            }
+            onMouseLeave={() => setTip(null)}
+          />
+        ))}
       </svg>
       {tip && <ChartTooltip tip={tip} />}
     </Card>

@@ -8,7 +8,8 @@ import { BellRing, CircleCheckBig, ClipboardCheck, Moon, Plus } from "lucide-rea
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AsNeededCard } from "@/components/as-needed-card";
-import { DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
+import { CareDueRow, CareRow, DoneRow, DueRow, LaterRow, MissedRow, Section } from "@/components/checklist-rows";
+import { MeasureCard } from "@/components/measure-card";
 import { EarlierDoseButton } from "@/components/earlier-dose";
 import { EditDoseDialog } from "@/components/edit-dose-dialog";
 import { useLiveRefresh, useRecentlyLogged } from "@/components/live-provider";
@@ -20,14 +21,17 @@ import { ReviewScreen } from "@/components/review-screen";
 import { usePersons } from "@/components/person-context";
 import { useDoseLogger } from "@/components/use-dose-logger";
 import { api } from "@/lib/client";
-import { buildChecklist } from "@/lib/checklist";
+import { lastLogAt as lastOf } from "@/lib/care";
+import { buildCareList, buildChecklist } from "@/lib/checklist";
 import { closeStaleNotifications, usePushSupport, useDevicePush } from "@/lib/push-client";
-import { DAY, isFinished, type LogEntry } from "@/lib/schedule";
+import { DAY, isCare, isFinished, spanDays, type LogEntry } from "@/lib/schedule";
 import {
   currentScheduleFrom,
   doseAmountOf,
   dayOf,
+  kindOf,
   nightCandidates,
+  parseWeekdays,
   personDayOf,
   scheduleOf,
   toLogEntries,
@@ -43,6 +47,8 @@ interface HomeData {
   profile: ProfileDTO;
   medicines: MedicineDTO[];
   doses: DoseDTO[];
+  /** Doses are loaded from this instant on (older last logs come from `lastLogAt`). */
+  loadedFrom: number;
 }
 
 async function loadHome(personId: string, onMigrated: () => void): Promise<HomeData> {
@@ -59,9 +65,18 @@ async function loadHome(personId: string, onMigrated: () => void): Promise<HomeD
     medicines = await api<MedicineDTO[]>(medsUrl);
     onMigrated();
   }
-  const from = new Date(Date.now() - 3 * DAY).toISOString();
+  // Enough history for every check: 3 days, a weekly schedule's previous dose, a
+  // task's "not more often than" window.
+  const backDays = Math.max(
+    3,
+    ...medicines.map((m) =>
+      Math.max((m.minDays ?? 0) + 1, spanDays({ weekdays: parseWeekdays(m.weekdays), everyDays: m.everyDays }) + 2),
+    ),
+  );
+  const loadedFrom = Date.now() - backDays * DAY;
+  const from = new Date(loadedFrom).toISOString();
   const doses = await api<DoseDTO[]>(`/api/doses?personId=${pid}&from=${encodeURIComponent(from)}`);
-  return { personId, profile, medicines, doses };
+  return { personId, profile, medicines, doses, loadedFrom };
 }
 
 const REVIEW_KEY = "pills.reviewClosed";
@@ -148,14 +163,6 @@ export function HomeScreen() {
   }, [medicines, doses]);
   const logsFor = useCallback((id: string) => logsByMed.get(id) ?? [], [logsByMed]);
 
-  // When the app opens (and after each reload), close notifications for slots already logged.
-  useEffect(() => {
-    if (!ready) return;
-    void closeStaleNotifications((medicineId, slotAt) =>
-      (logsByMed.get(medicineId) ?? []).some((l) => l.slotAt === slotAt),
-    ).catch(() => {});
-  }, [ready, logsByMed]);
-
   const { requestLog, dialog, slotFor } = useDoseLogger({
     profile: ready?.profile ?? null,
     person,
@@ -185,6 +192,36 @@ export function HomeScreen() {
       ),
     [active, person, logsFor, now, ready],
   );
+
+  // Tasks, to-dos and measurements due by a date (flex / once).
+  const careList = useMemo(
+    () =>
+      buildCareList(
+        active
+          .filter((m) => isCare(m.mode))
+          .map((m) => ({
+            id: m.id,
+            schedule: scheduleOf(m, person),
+            logs: logsFor(m.id),
+            lastAt: lastOf(logsFor(m.id), m.lastLogAt ? Date.parse(m.lastLogAt) : null, ready?.loadedFrom),
+            anchor: Date.parse(m.scheduleReviewedAt ?? m.createdAt),
+          })),
+        now,
+      ),
+    [active, person, logsFor, now, ready],
+  );
+
+  // When the app opens (and after each reload), close notifications for slots already logged
+  // and for care items no longer due in that cycle.
+  useEffect(() => {
+    if (!ready) return;
+    const careIds = new Set(medicines.filter((m) => isCare(m.mode)).map((m) => m.id));
+    void closeStaleNotifications((medicineId, slotAt) =>
+      careIds.has(medicineId)
+        ? !careList.due.some((r) => r.medicineId === medicineId && r.status.cycleAt === slotAt)
+        : (logsByMed.get(medicineId) ?? []).some((l) => l.slotAt === slotAt),
+    ).catch(() => {});
+  }, [ready, medicines, logsByMed, careList]);
 
   const night = useMemo(() => nightCandidates(medicines, person, now), [medicines, person, now]);
   const windowText = `${person.wakeTime}–${person.bedTime}`;
@@ -254,20 +291,33 @@ export function HomeScreen() {
     const d = doses.find((x) => x.id === doseId);
     return d?.loggedBy && meId && d.loggedBy.id !== meId ? (d.loggedBy.name ?? d.loggedBy.email) : null;
   };
-  const take = (m: MedicineDTO, slotAt: number) =>
-    requestLog(m, { amount: doseAmountOf(m), status: "taken", slotAt });
+  // A measurement needs its value: the row opens the sheet instead of logging at once.
+  const take = (m: MedicineDTO, slotAt?: number) =>
+    kindOf(m) === "measure"
+      ? setSheet({ medicine: m, slotAt })
+      : requestLog(m, { amount: kindOf(m) === "task" ? 1 : doseAmountOf(m), status: "taken", slotAt });
   const skip = (m: MedicineDTO, slotAt: number) =>
-    requestLog(m, { amount: doseAmountOf(m), status: "skipped", slotAt });
+    requestLog(m, { amount: kindOf(m) === "medicine" ? doseAmountOf(m) : 1, status: "skipped", slotAt });
 
-  const asNeeded = active.filter((m) => scheduleOf(m, person).mode === "asNeeded");
+  const anyTime = active.filter((m) => scheduleOf(m, person).mode === "asNeeded");
+  const asNeeded = anyTime.filter((m) => kindOf(m) !== "measure");
+  const measures = anyTime.filter((m) => kindOf(m) === "measure");
+  const hasCare = careList.due.length + careList.upcoming.length > 0;
   const showPrompt =
     support === "supported" &&
     profile.remindersOn &&
     device.state === "off" &&
     !promptDismissed &&
     !unreviewed.length &&
-    checklist.hasScheduled;
-  const nothingLeft = checklist.hasScheduled && !checklist.due.length && !checklist.missed.length && !checklist.later.length;
+    (checklist.hasScheduled || hasCare);
+  const nothingLeft =
+    (checklist.hasScheduled || hasCare) &&
+    !checklist.due.length &&
+    !checklist.missed.length &&
+    !checklist.later.length &&
+    !careList.due.length;
+  const done = [...checklist.done, ...careList.done].sort((a, b) => a.log.takenAt - b.log.takenAt);
+  const lastLogOf = (m: MedicineDTO) => lastOf(logsFor(m.id), m.lastLogAt ? Date.parse(m.lastLogAt) : null, ready.loadedFrom);
 
   return (
     <div className="space-y-5">
@@ -332,7 +382,7 @@ export function HomeScreen() {
         </Card>
       )}
 
-      {checklist.due.length > 0 && (
+      {checklist.due.length + careList.due.length > 0 && (
         <Section title={t("home.dueNow")}>
           {checklist.due.map(({ medicineId, slot }) => {
             const m = medById.get(medicineId)!;
@@ -345,6 +395,20 @@ export function HomeScreen() {
                 now={now}
                 onTake={() => take(m, slot.slotAt)}
                 onMore={() => setSheet({ medicine: m, slotAt: slot.slotAt })}
+              />
+            );
+          })}
+          {careList.due.map(({ medicineId, status }) => {
+            const m = medById.get(medicineId)!;
+            return (
+              <CareDueRow
+                key={`care:${medicineId}`}
+                medicine={m}
+                status={status}
+                timeZone={timeZone}
+                now={now}
+                onDone={() => take(m)}
+                onMore={() => setSheet({ medicine: m })}
               />
             );
           })}
@@ -399,9 +463,9 @@ export function HomeScreen() {
         </Card>
       )}
 
-      {checklist.done.length > 0 && (
+      {done.length > 0 && (
         <Section title={t("home.done")}>
-          {checklist.done.map(({ medicineId, log }) => {
+          {done.map(({ medicineId, log }) => {
             const m = medById.get(medicineId)!;
             const dose = doses.find((d) => d.id === log.id);
             return (
@@ -418,6 +482,53 @@ export function HomeScreen() {
             );
           })}
         </Section>
+      )}
+
+      {careList.upcoming.length > 0 && (
+        <Section title={t("home.tasks")}>
+          {careList.upcoming.map(({ medicineId, status }) => {
+            const m = medById.get(medicineId)!;
+            return (
+              <CareRow
+                key={`care:${medicineId}`}
+                medicine={m}
+                status={status}
+                timeZone={timeZone}
+                now={now}
+                highlight={logsFor(m.id).some((l) => !!l.id && recent.has(l.id))}
+                onDone={() => take(m)}
+                onMore={() => setSheet({ medicine: m })}
+              />
+            );
+          })}
+        </Section>
+      )}
+
+      {measures.length > 0 && (
+        <section className="space-y-1.5">
+          <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("home.measurements")}
+          </h2>
+          <div className="space-y-2">
+            {measures.map((m) => {
+              const logs = logsFor(m.id);
+              const last = [...logs].sort((a, b) => b.takenAt - a.takenAt)[0];
+              return (
+                <MeasureCard
+                  key={m.id}
+                  medicine={m}
+                  logs={logs}
+                  lastAt={lastLogOf(m)}
+                  now={now}
+                  lastBy={loggedByOther(last?.id)}
+                  highlight={!!last?.id && recent.has(last.id)}
+                  onLog={() => setSheet({ medicine: m })}
+                  onMore={() => setSheet({ medicine: m, initialAt: Date.now() })}
+                />
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {asNeeded.length > 0 && (

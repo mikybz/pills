@@ -10,6 +10,7 @@ import {
   nextSlotChange,
   reminderEvents,
   slotForLog,
+  spanDays,
   spreadTimes,
   validDayWindow,
   SNOOZE_SEQ_BASE,
@@ -19,6 +20,7 @@ import {
   type Schedule,
 } from "./schedule";
 import { checkDose } from "./safety";
+import { buildChecklist } from "./checklist";
 import { zonedToUtc } from "./tz";
 
 const TZ = "Europe/Oslo";
@@ -559,5 +561,65 @@ describe("history", () => {
 
   it("a range with no schedule in force has no slots", () => {
     expect(historySlots([], [], 0, 10 * HOUR, 10 * HOUR)).toEqual([]);
+  });
+});
+
+describe("day rules: weekly and every N days (PLAN.md §15.3)", () => {
+  // 2026-01-12 is a Monday.
+  const mondays = sched({ times: ["08:00"], weekdays: [0] });
+  const monThu = sched({ times: ["08:00"], weekdays: [0, 3] });
+  const every3 = sched({ times: ["09:00"], everyDays: 3, startsOn: "2026-01-15" });
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  it("slots only on the chosen weekdays", () => {
+    const s = fixedSlots(mondays, [], at("2026-01-12", "00:00"), at("2026-01-25", "23:59"), state(at("2026-01-11", "12:00")));
+    expect(s.map((x) => x.slotAt)).toEqual([at("2026-01-12", "08:00"), at("2026-01-19", "08:00")]);
+  });
+
+  it("every 3 days counts from startsOn, nothing before it", () => {
+    const s = fixedSlots(every3, [], at("2026-01-10", "00:00"), at("2026-01-22", "23:59"), state(at("2026-01-10", "12:00")));
+    expect(s.map((x) => iso(x.slotAt))).toEqual([at("2026-01-15", "09:00"), at("2026-01-18", "09:00"), at("2026-01-21", "09:00")].map(iso));
+  });
+
+  it("spanDays: daily 1, weekly 7, Mon+Thu 4, every 14 days 14", () => {
+    expect(spanDays(daily)).toBe(1);
+    expect(spanDays(mondays)).toBe(7);
+    expect(spanDays(monThu)).toBe(4);
+    expect(spanDays({ everyDays: 14 })).toBe(14);
+  });
+
+  it("a weekly dose is overdue until halfway to the next one, then missed", () => {
+    const slot = (now: number) => fixedSlots(mondays, [], at("2026-01-12", "00:00"), at("2026-01-12", "23:59"), state(now))[0];
+    expect(slot(at("2026-01-15", "19:59")).state).toBe("overdue");
+    expect(slot(at("2026-01-15", "20:00")).state).toBe("missed");
+  });
+
+  it("Today lists a weekly dose from two days ago under due, and a tap fills it", () => {
+    const now = at("2026-01-14", "10:00");
+    const list = buildChecklist(
+      [{ id: "m", schedule: mondays, logs: [], anchor: 0, slotsFrom: null, missedFrom: 0 }],
+      now,
+      10,
+    );
+    expect(list.due.map((r) => r.slot.slotAt)).toEqual([at("2026-01-12", "08:00")]);
+    expect(assignSlot(mondays, [], now, now, { leadMin: 10, anchor: 0 })).toBe(at("2026-01-12", "08:00"));
+  });
+
+  it("a late dose never drifts the next scheduled day", () => {
+    const logs = [log(at("2026-01-12", "11:00"), at("2026-01-12", "08:00"))];
+    const thu = fixedSlots(monThu, logs, at("2026-01-15", "00:00"), at("2026-01-15", "23:59"), state(at("2026-01-15", "07:00")))[0];
+    expect(thu.effectiveAt).toBe(at("2026-01-15", "08:00"));
+  });
+
+  it("around the clock too: a weekly dose taken days late doesn't drift the next one", () => {
+    const weeklyNight = { ...mondays, day: null };
+    const logs = [log(at("2026-01-15", "06:00"), at("2026-01-12", "08:00"))];
+    const next = fixedSlots(weeklyNight, logs, at("2026-01-19", "00:00"), at("2026-01-19", "23:59"), state(at("2026-01-16", "12:00")))[0];
+    expect(next.effectiveAt).toBe(at("2026-01-19", "08:00"));
+  });
+
+  it("a backdated dose on an off day answers the previous open slot (late) or none", () => {
+    const when = at("2026-01-13", "09:00");
+    expect(assignSlot(mondays, [], when, at("2026-01-13", "12:00"), { leadMin: 10, anchor: 0 })).toBe(at("2026-01-12", "08:00"));
   });
 });

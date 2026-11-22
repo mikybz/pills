@@ -1,5 +1,6 @@
 // App-shell service worker: caches static assets (network-first for pages),
-// shows reminder notifications and handles their Taken / Snooze actions, and
+// shows reminder notifications and handles their Taken / Snooze actions (and Done
+// on the care notification of tasks and to-dos), and
 // shows "Anna gave Rex …" notices (kind "logged"), and keeps one reminder per person
 // in step with the doses logged anywhere (kinds "update" / "close").
 // Logging always needs the network; nothing is queued offline.
@@ -142,18 +143,20 @@ self.addEventListener("notificationclick", (e) => {
   const items = Array.isArray(data.items) ? data.items : [];
   n.close();
 
-  if (e.action === "taken" && items.length) {
+  if ((e.action === "taken" || e.action === "done") && items.length) {
     // Same-origin fetch: the session cookie is sent. On 401 or any failure, open
-    // the app instead — never queue silently.
+    // the app instead — never queue silently. Measurements need a value: never
+    // logged from here. Care items (tasks) have no slot.
     e.waitUntil(
       (async () => {
         try {
           const takenAt = new Date().toISOString();
           for (const it of items) {
+            if (it.measure) continue;
             await post("/api/doses", {
               medicineId: it.medicineId,
               amount: it.amount,
-              slotAt: it.slotAt,
+              ...(it.care ? {} : { slotAt: it.slotAt }),
               takenAt,
               status: "taken",
             });

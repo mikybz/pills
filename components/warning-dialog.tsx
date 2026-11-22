@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { CheckResult, Reason } from "@/lib/safety";
-import { formatAmount, formatDateTime, formatDose, formatDuration, formatTime } from "@/lib/format";
+import { formatAmount, formatDateTime, formatDays, formatDaysAgo, formatDose, formatDuration, formatTime } from "@/lib/format";
 import { localDate } from "@/lib/tz";
 import type { MedicineDTO } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
@@ -67,6 +67,14 @@ export function WarningDialog({
           hours: formatAmount(r.windowH),
           max: formatDose(r.max, medicine.unit, t),
         });
+      case "careEarly":
+        return t("warning.careEarly", {
+          when: formatDaysAgo(r.takenAt, now, locale, timeZone, t),
+          date: formatDateTime(r.takenAt, locale, timeZone),
+          min: formatDays(r.minDays, t),
+        });
+      case "careDone":
+        return t("warning.careDone", { date: formatDateTime(r.takenAt, locale, timeZone) });
     }
   }
 

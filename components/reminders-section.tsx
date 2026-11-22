@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PersonIcon, isShared, usePersons } from "@/components/person-context";
+import { TimeField } from "@/components/time-field";
 import { api } from "@/lib/client";
 import { formatDuration } from "@/lib/format";
 import { usePushSupport, useDevicePush } from "@/lib/push-client";
@@ -143,6 +144,18 @@ export function RemindersSection({
             {choice(t("reminders.nagEvery"), profile.nagEveryMin, NAG_OPTIONS, "nagEveryMin")}
             {profile.nagEveryMin > 0 &&
               choice(t("reminders.nagMax"), profile.nagMaxMin, NAG_MAX_OPTIONS, "nagMaxMin")}
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label>{t("reminders.careTime")}</Label>
+                <p className="text-xs text-muted-foreground">{t("reminders.careTimeHint")}</p>
+              </div>
+              <TimeField
+                value={profile.careRemindTime}
+                label={t("reminders.careTime")}
+                onChange={(v) => updateProfile({ careRemindTime: v })}
+              />
+            </div>
 
             <Button
               variant="outline"

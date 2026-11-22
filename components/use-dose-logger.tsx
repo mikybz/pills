@@ -9,9 +9,10 @@ import { api } from "@/lib/client";
 import { formatDose, formatTime, formatWhen } from "@/lib/format";
 import { closeStaleNotifications, pushEndpointHeader } from "@/lib/push-client";
 import { checkDose, type CheckResult } from "@/lib/safety";
-import { nextSlotChange, slotForLog, type DoseStatus, type LogEntry } from "@/lib/schedule";
+import { isCare, nextSlotChange, slotForLog, type DoseStatus, type LogEntry } from "@/lib/schedule";
 import { localDate } from "@/lib/tz";
 import {
+  kindOf,
   scheduleOf,
   type DoseDTO,
   type LogResponse,
@@ -85,6 +86,8 @@ export function useDoseLogger({
         void closeStaleNotifications(
           (medicineId, slotAt) =>
             (medicineId === medicine.id && logged.slotAt !== null && Date.parse(logged.slotAt) === slotAt) ||
+            // A care item (task / to-do) is answered by any log: its cycle is over.
+            (medicineId === medicine.id && isCare(medicine.mode)) ||
             logsFor(medicineId).some((l) => l.slotAt === slotAt),
         ).catch(() => {});
         // The server re-checks with fresh data (e.g. another user just logged it).
@@ -93,18 +96,23 @@ export function useDoseLogger({
             ? res.check.reasons[0]
             : null;
         const now = Date.now();
+        const kind = kindOf(medicine);
         // A log for another day won't show under Done, so the toast names the day and time.
         const otherDay = localDate(req.takenAt, person.timezone) !== localDate(now, person.timezone);
         const message = serverWarning
-          ? t("warning.afterTheFact", { name: medicine.name })
+          ? t(kind === "task" ? "warning.afterTheFactTask" : "warning.afterTheFact", { name: medicine.name })
           : req.status === "skipped"
-            ? t("home.skippedToast", { name: medicine.name })
+            ? t(kind === "task" ? "home.notNeededToast" : "home.skippedToast", { name: medicine.name })
             : otherDay
               ? t("home.loggedAt", {
                   name: medicine.name,
                   when: formatWhen(req.takenAt, now, locale, person.timezone, t),
                 })
-              : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
+              : kind === "task"
+                ? t("home.doneToast", { name: medicine.name })
+                : kind === "measure"
+                  ? t("home.loggedValue", { name: medicine.name, value: formatDose(req.amount, medicine.unit, t) })
+                  : t("home.logged", { dose: formatDose(req.amount, medicine.unit, t), name: medicine.name });
         // Drift / push rule: say when this log moved the next dose.
         const movedTo = nextSlotChange(
           scheduleOf(medicine, person),
@@ -150,7 +158,8 @@ export function useDoseLogger({
       // From a row, send the resolved slot (a dose backdated past the row's window
       // answers an earlier slot or none); otherwise the server assigns with fresh data.
       const req: Resolved = { ...request, takenAt, slotAt: request.slotAt !== undefined ? slotAt : undefined };
-      if (req.status === "skipped") {
+      // Skips never warn; a measurement is a reading, not a dose.
+      if (req.status === "skipped" || kindOf(medicine) === "measure") {
         void persist(medicine, req);
         return;
       }

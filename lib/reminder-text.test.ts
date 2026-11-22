@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { closePayload, reminderPayload, reminderTag, translatorFor, type ReminderItem } from "./reminder-text";
+import {
+  carePayload,
+  careTag,
+  closePayload,
+  reminderPayload,
+  reminderTag,
+  translatorFor,
+  type CareItem,
+  type ReminderItem,
+} from "./reminder-text";
 import { formatDose, unitLabel } from "./format";
 
 const person = { id: "p", name: "Rex", timezone: "Europe/Oslo" };
@@ -75,6 +84,58 @@ describe("one notification per person", () => {
   it("an update replaces quietly; close carries the same tag and no text", () => {
     const u = reminderPayload({ locale: "en", person, forOther: false, leadMin: 10, items: [noon], update: true });
     expect(u).toMatchObject({ kind: "update", renotify: false, silent: true, tag: reminderTag("p") });
-    expect(closePayload("nb", "p")).toMatchObject({ kind: "close", tag: reminderTag("p"), body: "" });
+    expect(closePayload("nb", reminderTag("p"))).toMatchObject({ kind: "close", tag: reminderTag("p"), body: "" });
+  });
+});
+
+describe("measurements in dose reminders", () => {
+  it("say measure, list no amount, and offer no Taken (a reading needs a value)", () => {
+    const bp = item({ name: "Blodtrykk", unit: "mmHg", itemKind: "measure" });
+    const p = payload("en", "due", [bp]);
+    expect(p.body).toBe("Time to measure: Blodtrykk");
+    expect(p.actions?.map((a) => a.action)).toEqual(["snooze"]);
+    expect(payload("nb", "nag", [bp]).body).toMatch(/^Ikke målt ennå: Blodtrykk/);
+    // Mixed with a dose: Taken logs the dose only.
+    const mixed = payload("en", "due", [bp, item({})]);
+    expect(mixed.actions?.[0].action).toBe("taken");
+    expect((mixed.data as { items: { measure?: boolean }[] }).items.filter((i) => i.measure)).toHaveLength(1);
+  });
+});
+
+describe("care notification (tasks and to-dos)", () => {
+  const bamse = { id: "b", name: "Bamse", timezone: "Europe/Oslo" };
+  const care = (p: Partial<CareItem>): CareItem => ({
+    medicineId: "c",
+    name: "Klippe klør",
+    itemKind: "task",
+    state: "soon",
+    daysLeft: 2,
+    dueAt: null,
+    cycleAt: 0,
+    ...p,
+  });
+  const make = (locale: string, items: CareItem[], forOther = true) =>
+    carePayload({ locale, person: bamse, forOther, items, now: 0 });
+
+  it("one line per item, most urgent first, under the pet's name", () => {
+    const p = make("en", [care({}), care({ medicineId: "w", name: "Wash", state: "overdue", daysLeft: -3 })]);
+    expect(p.title).toBe("Bamse");
+    expect(p.body).toBe("Wash: 3 days overdue\nKlippe klør: 2 days left");
+    expect(p.tag).toBe(careTag("b"));
+    expect(p.actions).toEqual([{ action: "done", title: "Done" }]);
+    expect(make("nb", [care({ daysLeft: 1 })]).body).toBe("Klippe klør: 1 dag igjen");
+    expect(make("nb", [care({ daysLeft: 0, state: "today" })], false).title).toBe("Gjøremål");
+  });
+
+  it("a one-off with a time names it; a measurement removes the Done action", () => {
+    const vet = care({ name: "Vet", daysLeft: 0, state: "today", dueAt: Date.UTC(2026, 0, 20, 9, 30) });
+    expect(make("en", [vet]).body).toBe("Vet: today at 10:30");
+    expect(make("en", [care({ itemKind: "measure", name: "Weight", daysLeft: 0, state: "today" })]).actions).toEqual([]);
+  });
+
+  it("an update replaces quietly; the close targets the care tag", () => {
+    const u = carePayload({ locale: "en", person: bamse, forOther: true, items: [care({})], now: 0, update: true });
+    expect(u).toMatchObject({ kind: "update", renotify: false, silent: true });
+    expect(closePayload("en", careTag("b"))).toMatchObject({ kind: "close", tag: "care:b" });
   });
 });
